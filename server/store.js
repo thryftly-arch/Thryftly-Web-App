@@ -41,7 +41,18 @@ const SEED = () => ({
     signupTitle: 'GET THE DROP ALERT.',
     footerWord: 'THRYFTLY',
     socials: { instagram: '', tiktok: '', discord: '' },
+    contact: { email: '', phone: '', whatsapp: '', address: '', hours: '' },
   },
+  // Long-form pages, edited in Admin → Pages. Plain text: blank line = paragraph, "- " = list, "# " = heading.
+  // The policies are starting drafts with [brackets] to fill in; check them before launch.
+  pages: {
+    about: { title: 'ABOUT THRYFTLY', body: "THRYFTLY is streetwear charged for the street: bold graphics, oversized fits and drops that don't hang around.\n\nEvery piece is printed to order, so nothing sits in a warehouse and nothing goes to waste. Pick your colour and size, and it's made for you.\n\n# THE DROPS\nNew designs land in drops. Get the drop alert at the bottom of the page so you hear first." },
+    shipping: { title: 'SHIPPING POLICY', body: "# PROCESSING\nEvery order is printed to order. Orders are usually printed and dispatched within [3–5] business days.\n\n# DELIVERY\nWe ship across India. Delivery usually takes [4–7] business days after dispatch, depending on your PIN code.\n\n# TRACKING\nOnce your order ships, you can follow it on the Track Order page with your order number and email.\n\n# SHIPPING COST\n[Free shipping on all orders / Shipping is calculated at checkout.]" },
+    returns: { title: 'RETURNS & REFUNDS', body: "Because every piece is printed to order, we can't accept returns for change of mind or wrong size. Please check the size chart before ordering.\n\n# DAMAGED OR WRONG ITEM\nIf your order arrives damaged, misprinted or wrong, contact us within [7] days of delivery with your order number and photos. We'll send a replacement or refund you.\n\n# REFUNDS\nApproved refunds go back to your original payment method within [5–7] business days.\n\n# CANCELLATIONS\nOrders can be cancelled within [12] hours of placing them, before they go to print." },
+    privacy: { title: 'PRIVACY POLICY', body: "We collect only what we need to make and deliver your order: your name, email, phone number and shipping address.\n\n- Payments are processed by Razorpay. We never see or store your card or UPI details.\n- Your name, phone and address are shared with our print and shipping partner only to fulfil your order.\n- If you join the drop alert, we use your email to tell you about new drops. Unsubscribe any time.\n- AI try-on photos stay on your device unless you press \"Ask the AI stylist\". They are then analysed once and not stored.\n\nQuestions about your data? Contact us at [your email]." },
+    terms: { title: 'TERMS OF SERVICE', body: "By using this site and placing an order, you agree to these terms.\n\n# ORDERS & PRICING\nAll prices are in Indian Rupees and include applicable taxes unless stated. We may cancel an order and refund you in full if a product is unavailable or mispriced.\n\n# PRODUCTS\nColours on screen can differ slightly from the printed product. Sizes follow the size guide on each product.\n\n# INTELLECTUAL PROPERTY\nAll designs, graphics and content on this site belong to THRYFTLY and may not be reused without permission.\n\n# CONTACT\n[Business name, address and email]." },
+  },
+  messages: [],
   products: [
     {
       id: id(), slug: 'volt-hoodie', name: 'VOLT HOODIE', edition: '/07', price: 128, category: 'OUTERWEAR',
@@ -62,6 +73,12 @@ const SEED = () => ({
 });
 
 export const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : SEED();
+
+// Older databases miss keys added since they were created: fill those in, never overwrite.
+const seed = SEED();
+for (const [k, v] of Object.entries(seed.settings)) if (!(k in db.settings)) db.settings[k] = v;
+db.pages = { ...seed.pages, ...db.pages };
+db.messages ??= [];
 
 export function save() {
   const tmp = DB_FILE + '.tmp';

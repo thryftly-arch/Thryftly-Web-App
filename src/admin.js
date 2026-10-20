@@ -47,7 +47,7 @@ async function boot() {
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ products: viewProducts, site: viewSite, orders: viewOrders, subscribers: viewSubs })[tab]();
+  ({ products: viewProducts, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -232,6 +232,9 @@ async function viewSite() {
       <div class="adm-field full">HERO GRAPHIC <small>Replaces the 3D bolt. Leave empty to keep the bolt. Transparent PNG recommended.</small><div class="adm-imgs"></div></div>
       <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">SOCIAL LINKS</h2>
       ${['instagram', 'tiktok', 'discord'].map(k => `<label class="adm-field">${k.toUpperCase()}<input name="social_${k}" placeholder="https://" value="${esc(s.socials?.[k])}"></label>`).join('')}
+      <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">CONTACT DETAILS <small>shown on the Contact page; leave blank to hide</small></h2>
+      ${[['email', 'EMAIL'], ['phone', 'PHONE'], ['whatsapp', 'WHATSAPP NUMBER'], ['hours', 'HOURS']].map(([k, l]) => `<label class="adm-field">${l}<input name="contact_${k}" value="${esc(s.contact?.[k])}"></label>`).join('')}
+      <label class="adm-field full">ADDRESS<textarea name="contact_address">${esc(s.contact?.address)}</textarea></label>
       <div class="adm-actions"><span></span><button class="btn-red">SAVE SITE CONTENT</button></div>
     </form>`;
   const form = $('.adm-form', main());
@@ -241,10 +244,49 @@ async function viewSite() {
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
-    const body = { ...s, ...fd, marquee: marquee.map(m => m.t), socials: { instagram: fd.social_instagram, tiktok: fd.social_tiktok, discord: fd.social_discord } };
+    const body = { ...s, ...fd, marquee: marquee.map(m => m.t), socials: { instagram: fd.social_instagram, tiktok: fd.social_tiktok, discord: fd.social_discord },
+      contact: { email: fd.contact_email, phone: fd.contact_phone, whatsapp: fd.contact_whatsapp, hours: fd.contact_hours, address: fd.contact_address } };
     if (fd.countdownTarget) body.countdownTarget = new Date(fd.countdownTarget).toISOString();
     try { const saved = await req('PUT', '/settings', body); symbol = saved.symbol; toast('SAVED — LIVE ON SITE'); } catch (err) { toast(err.message, true); }
   });
+}
+
+/* ---------- pages ---------- */
+const PAGE_LABELS = { about: 'ABOUT', shipping: 'SHIPPING POLICY', returns: 'RETURNS & REFUNDS', privacy: 'PRIVACY POLICY', terms: 'TERMS OF SERVICE' };
+async function viewPages() {
+  const pages = await req('GET', '/pages');
+  main().innerHTML = `
+    <div class="adm-bar"><h1 class="adm-h">PAGES</h1></div>
+    <p class="adm-note">Plain text. A blank line starts a new paragraph, lines starting with "- " become a list, and a line starting with "# " becomes a heading. The policies are starting drafts: replace everything in [brackets], or paste your old Shopify policies (Shopify Settings → Policies). Razorpay checks these pages before activating live payments.</p>
+    <form class="adm-form">
+      ${Object.entries(PAGE_LABELS).map(([k, l]) => `
+        <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">${l} <a class="adm-link" href="${k === 'about' ? '/about.html' : '/policy.html?p=' + k}" target="_blank">VIEW →</a></h2>
+        <label class="adm-field full">TITLE<input name="${k}_title" value="${esc(pages[k]?.title)}"></label>
+        <label class="adm-field full">TEXT<textarea name="${k}_body" style="min-height:220px">${esc(pages[k]?.body)}</textarea></label>`).join('')}
+      <div class="adm-actions"><span></span><button class="btn-red">SAVE PAGES</button></div>
+    </form>`;
+  $('.adm-form', main()).addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(e.target));
+    const body = Object.fromEntries(Object.keys(PAGE_LABELS).map(k => [k, { title: fd[k + '_title'], body: fd[k + '_body'] }]));
+    try { await req('PUT', '/pages', body); toast('SAVED — LIVE ON SITE'); } catch (err) { toast(err.message, true); }
+  });
+}
+
+/* ---------- messages ---------- */
+async function viewMessages() {
+  const msgs = await req('GET', '/messages');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">MESSAGES</h1></div>
+    <p class="adm-note">From the Contact page. Reply by email: the address is a link.</p><div class="list">${msgs.length ? '' : '<p class="adm-note">No messages yet.</p>'}</div>`;
+  for (const m of msgs) {
+    const el = h(`<details class="adm-order"${m.read ? '' : ' open'}><summary><span>${m.read ? '' : '<span class="adm-pill yel">NEW</span> '}${esc(m.name)}</span><span>${new Date(m.at).toLocaleString()}</span><span>${esc(m.message.slice(0, 60))}…</span><span>${esc(m.order)}</span><span></span></summary>
+      <div class="adm-order-body"><div style="white-space:pre-wrap">${esc(m.message)}</div>
+      <div><a class="adm-link" href="mailto:${esc(m.email)}?subject=${encodeURIComponent('Re: your message to THRYFTLY')}">${esc(m.email)}</a>${m.order ? `<br>Order: ${esc(m.order)}` : ''}<br><br>
+      <button class="btn-ghost read">${m.read ? 'MARK UNREAD' : 'MARK READ'}</button> <button class="adm-danger del">DELETE</button></div></div></details>`);
+    $('.read', el).addEventListener('click', async () => { await req('PUT', '/messages/' + m.id, { read: !m.read }); viewMessages(); });
+    $('.del', el).addEventListener('click', async () => { if (confirm('Delete this message?')) { await req('DELETE', '/messages/' + m.id); viewMessages(); } });
+    $('.list', main()).append(el);
+  }
 }
 
 /* ---------- orders ---------- */

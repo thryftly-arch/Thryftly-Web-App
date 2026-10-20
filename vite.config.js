@@ -5,7 +5,7 @@ export default {
   build: {
     target: 'es2022', // top-level await in the page scripts
     rollupOptions: {
-      input: Object.fromEntries(['index', 'product', 'checkout', 'admin'].map(n => [n, resolve(`${n}.html`)])),
+      input: Object.fromEntries(['index', 'product', 'checkout', 'admin', 'shop', 'about', 'contact', 'policy', 'track'].map(n => [n, resolve(`${n}.html`)])),
     },
   },
 };

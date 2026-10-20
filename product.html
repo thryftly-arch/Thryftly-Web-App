@@ -12,14 +12,7 @@
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
-  <header class="nav">
-    <a class="brand" href="/">
-      <svg class="brand-bolt" viewBox="-4 -4 112 172" aria-hidden="true"><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" transform="translate(8 8)" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FF3B3B" stroke="#000" stroke-width="6" stroke-linejoin="round"/></svg>
-      <span class="wordmark">THRYFTLY</span>
-    </a>
-    <span class="crumbs d-only"><a href="/#shop">SHOP</a> / <a href="/" data-s="dropLabel">DROP 07</a> / <span class="p-category"></span> / <span class="yel p-name"></span></span>
-    <a class="cart-btn" href="/checkout.html">CART [<span class="cart-count">0</span>]</a>
-  </header>
+  <header class="nav" data-chrome></header>
 
   <main class="pdp">
     <section class="viewer">
@@ -43,6 +36,7 @@
     </section>
 
     <section class="details">
+      <span class="crumbs"><a href="/shop.html">SHOP</a> / <a class="p-cat-link" href="/shop.html"><span class="p-category"></span></a> / <span class="yel p-name"></span></span>
       <div class="badges"><span class="tag p-badge"></span><span class="badge-ghost p-tag"></span></div>
       <h1 class="pdp-h1"><span class="p-h1a"></span><br><span class="p-h1b"></span> <span class="pdp-num p-edition"></span></h1>
       <div class="price"><span class="price-main p-price"></span><span class="price-sub p-split"></span></div>
@@ -59,6 +53,13 @@
       <div class="specs"></div>
     </section>
   </main>
+
+  <section class="related" hidden>
+    <div class="sec-head"><h2 class="sec-h2">YOU MIGHT ALSO LIKE</h2><a class="sec-meta" href="/shop.html">SHOP ALL →</a></div>
+    <div class="grid related-grid"></div>
+  </section>
+
+  <footer class="footer" data-chrome></footer>
 
   <dialog class="tryon" aria-label="AI try-on">
     <div class="tryon-head">

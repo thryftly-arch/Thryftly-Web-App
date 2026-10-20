@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contact — THRYFTLY</title>
+  <meta name="description" content="Get in touch with THRYFTLY.">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body data-page="contact">
+  <header class="nav" data-chrome></header>
+  <main class="page page-split">
+    <section>
+      <h1 class="page-h1">HIT US <span class="volt">UP.</span></h1>
+      <p class="prose">Questions about an order, sizing or a collab? Send a message and we'll get back to you. For order updates, try <a href="/track.html">Track Order</a> first.</p>
+      <dl class="contact-list"></dl>
+    </section>
+    <form class="co-form contact-form">
+      <h2>SEND A MESSAGE</h2>
+      <input name="name" placeholder="Your name" autocomplete="name" required>
+      <input name="email" type="email" placeholder="Email" autocomplete="email" required>
+      <input name="order" placeholder="Order number (optional)">
+      <textarea name="message" rows="6" placeholder="Message" required></textarea>
+      <button class="btn-red" type="submit">SEND →</button>
+      <p class="co-msg" aria-live="polite"></p>
+    </form>
+  </main>
+
+  <footer class="footer" data-chrome></footer>
+  <script type="module" src="/src/pages.js"></script>
+</body>
+</html>

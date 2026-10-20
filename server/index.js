@@ -73,7 +73,7 @@ app.use(express.json({ limit: '12mb' })); // try-on photos come in as base64
 
 /* ---------------- public API ---------------- */
 app.get('/api/site', (req, res) => {
-  res.json({ settings: db.settings, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured() });
+  res.json({ settings: db.settings, pages: db.pages, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured() });
 });
 
 app.get('/api/products/:slug', (req, res) => {
@@ -87,6 +87,36 @@ app.post('/api/subscribe', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), (req, 
   if (!db.subscribers.some(s => s.email === email)) { db.subscribers.push({ email, at: new Date().toISOString() }); save(); }
   res.json({ ok: true });
 });
+
+app.post('/api/contact', rateLimit({ windowMs: 15 * 60e3, limit: 5 }), (req, res) => {
+  const m = { id: id(), name: str(req.body.name, 100), email: str(req.body.email, 200).toLowerCase(), order: str(req.body.order, 30), message: str(req.body.message, 3000), at: new Date().toISOString(), read: false };
+  if (!m.name || !m.message) return fail(res, 400, 'Add your name and a message');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email)) return fail(res, 400, 'Enter a valid email');
+  db.messages.push(m); save();
+  res.json({ ok: true });
+});
+
+// Customer order tracking: needs the order number AND the email it was placed with.
+const CUSTOMER_STATUS = { created: 'AWAITING PAYMENT', paid: 'CONFIRMED', sent_to_qikink: 'IN PRODUCTION', fulfillment_failed: 'CONFIRMED' };
+app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async (req, res) => {
+  const number = str(req.body.number, 30).toLowerCase().replace(/^#/, ''), email = str(req.body.email, 200).toLowerCase();
+  const o = db.orders.find(o => o.number.toLowerCase() === number && o.customer.email.toLowerCase() === email);
+  if (!o) return fail(res, 404, "We couldn't find that order. Check the number and the email you used at checkout.");
+  // Refresh from Qikink at most every 10 minutes per order.
+  if (o.qikink?.order_id && I.qikinkConfigured() && Date.now() - (o.trackedAt || 0) > 10 * 60e3) {
+    try {
+      const [q] = await I.qikinkOrders({ id: o.qikink.order_id });
+      if (q) { o.qikinkStatus = q.status; if (q.shipping?.tracking_link) o.tracking = { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name }; }
+      o.trackedAt = Date.now(); save();
+    } catch { /* show what we have */ }
+  }
+  res.json({
+    number: o.number, placed: o.createdAt, amount: o.amount, currency: o.currency,
+    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(),
+    items: o.items.map(i => ({ name: i.name, size: i.size, color: i.color, qty: i.qty })),
+    tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
+  });
+}));
 
 /* ---------------- checkout ---------------- */
 function priceCart(items) {
@@ -224,6 +254,16 @@ admin.put('/settings', (req, res) => {
   save(); res.json(db.settings);
 });
 
+/* pages + inbox */
+admin.get('/pages', (req, res) => res.json(db.pages));
+admin.put('/pages', (req, res) => {
+  for (const k of Object.keys(db.pages)) if (req.body[k]) db.pages[k] = { title: str(req.body[k].title, 80).toUpperCase(), body: str(req.body[k].body, 20000) };
+  save(); res.json(db.pages);
+});
+admin.get('/messages', (req, res) => res.json([...db.messages].reverse()));
+admin.put('/messages/:id', (req, res) => { const m = db.messages.find(m => m.id === req.params.id); if (m) { m.read = !!req.body.read; save(); } res.json({ ok: !!m }); });
+admin.delete('/messages/:id', (req, res) => { db.messages = db.messages.filter(m => m.id !== req.params.id); save(); res.json({ ok: true }); });
+
 /* products */
 function readProduct(b, prev = {}) {
   const slug = str(b.slug || b.name, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -296,6 +336,9 @@ admin.post('/orders/sync', wrap(async (req, res) => {
   res.json({ synced: open.length });
 }));
 
+// Shopify's Type column is often empty, so file products by what their title says.
+const categoryOf = t => [[/zip|hood/i, 'HOODIES'], [/sweatshirt/i, 'SWEATSHIRTS'], [/varsity|jacket/i, 'JACKETS'], [/sweatpant|jogger|pant/i, 'BOTTOMS'], [/tee|t-shirt|tshirt/i, 'TEES'], [/shirt/i, 'SHIRTS']].find(([re]) => re.test(t))?.[1] || 'APPAREL';
+
 // Shopify → our store. Images are copied to our own disk, since Shopify's CDN goes away with the store.
 async function downloadImage(url) {
   if (!/^https:\/\//.test(url)) return '';
@@ -354,7 +397,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
     const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
     const [front = '', back = '', detail = '', onBody = ''] = r.gallery.map(L);
     const fields = {
-      name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || prev?.category || 'APPAREL').toUpperCase().slice(0, 40),
+      name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || categoryOf(r.title)).toUpperCase().slice(0, 40),
       sizes: variants, colorImages: Object.fromEntries(Object.entries(r.colorImages).map(([c, u]) => [c, L(u)])),
       images: { front, back, detail, onBody }, shopify: { handle: r.handle, status: r.status },
     };

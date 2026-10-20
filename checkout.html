@@ -12,13 +12,7 @@
   <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
-  <header class="nav">
-    <a class="brand" href="/">
-      <svg class="brand-bolt" viewBox="-4 -4 112 172" aria-hidden="true"><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" transform="translate(8 8)" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FF3B3B" stroke="#000" stroke-width="6" stroke-linejoin="round"/></svg>
-      <span class="wordmark">THRYFTLY</span>
-    </a>
-    <span class="cart-btn">CART [<span class="cart-count">0</span>]</span>
-  </header>
+  <header class="nav" data-chrome></header>
 
   <main class="co">
     <section>
@@ -45,6 +39,8 @@
       <p class="co-msg" aria-live="polite"></p>
     </form>
   </main>
+
+  <footer class="footer" data-chrome></footer>
 
   <script type="module" src="/src/checkout.js"></script>
 </body>

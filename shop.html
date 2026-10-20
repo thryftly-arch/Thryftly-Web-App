@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shop all — THRYFTLY</title>
+  <meta name="description" content="Every THRYFTLY piece in one place: hoodies, tees, sweatshirts and more.">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body data-page="shop">
+  <header class="nav" data-chrome></header>
+  <main class="page">
+    <div class="page-head">
+      <h1 class="page-h1">SHOP <span class="volt">ALL.</span></h1>
+      <span class="sec-meta shop-count"></span>
+    </div>
+    <div class="shop-bar">
+      <div class="chips" role="tablist" aria-label="Category"></div>
+      <div class="shop-tools">
+        <input class="shop-search" type="search" placeholder="Search" aria-label="Search products">
+        <select class="shop-sort" aria-label="Sort">
+          <option value="featured">FEATURED</option>
+          <option value="az">A → Z</option>
+          <option value="low">PRICE: LOW → HIGH</option>
+          <option value="high">PRICE: HIGH → LOW</option>
+        </select>
+      </div>
+    </div>
+    <section class="grid shop-grid"></section>
+    <p class="shop-empty" hidden>NOTHING MATCHES. TRY ANOTHER SEARCH.</p>
+  </main>
+
+  <footer class="footer" data-chrome></footer>
+  <script type="module" src="/src/pages.js"></script>
+</body>
+</html>

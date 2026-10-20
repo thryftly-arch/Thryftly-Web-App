@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, addToCart } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -24,17 +24,6 @@ $$('.bolt3d').forEach(el => {
   el.innerHTML = html;
 });
 
-/* ---------- Mobile menu ---------- */
-const burger = $('.burger');
-burger?.addEventListener('click', () => {
-  const open = $('#nav-links').classList.toggle('open');
-  burger.setAttribute('aria-expanded', open);
-});
-$$('#nav-links a').forEach(a => a.addEventListener('click', () => {
-  $('#nav-links').classList.remove('open');
-  burger?.setAttribute('aria-expanded', 'false');
-}));
-
 /* ---------- Data ---------- */
 let site;
 try {
@@ -43,8 +32,9 @@ try {
   document.body.insertAdjacentHTML('afterbegin', '<div class="site-error">The shop is offline right now. Try again in a minute.</div>');
   throw new Error('site data unavailable');
 }
+mountChrome();
 bindSettings(site.settings);
-const url = p => `/product.html?p=${encodeURIComponent(p.slug)}`;
+const url = productUrl;
 const imgStyle = u => (u ? ` style="background-image:${esc(cssUrl(u))}"` : '');
 
 /* ---------- Countdown ---------- */
@@ -79,38 +69,14 @@ if (isHome) {
       <div class="ring-t"><span>${esc(p.name)}</span><span class="yel">${money(p.price)}</span></div>
     </a>`).join('');
 
-  const featured = products.filter(p => p.featured);
-  const soldOut = p => !p.sizes.some(z => z.available);
-  const sizeLine = p => {
-    const sizes = [...new Set(p.sizes.filter(z => z.available).map(z => z.label))];
-    return sizes.length > 3 ? `${sizes[0]}–${sizes.at(-1)}` : sizes.join('/') || 'SOLD OUT';
-  };
-  const colorLine = p => { const n = new Set(p.sizes.map(z => z.color).filter(Boolean)).size; return n > 1 ? `${n} COLOURS` : [...new Set(p.sizes.map(z => z.color))][0] || p.color; };
-  $('#shop').innerHTML = featured.map((p, i) => `
-    <div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${url(p)}">
-      <div class="pimg${p.images.front ? ' has-img' : ''}"${imgStyle(p.images.front)}>[ product shot ]${
-        soldOut(p) ? '<span class="tag tag-red">SOLD OUT</span>' : p.badge ? `<span class="tag tag-${p.badgeStyle === 'red' ? 'red' : 'yel'}">${esc(p.badge)}</span>` : ''}</div>
-      <div class="pinfo"><span class="pname">${esc(p.name)}${p.edition ? ' ' + esc(p.edition.replace('/', '/ ')) : ''}</span>
-      <div class="pmeta"><span>${esc([sizeLine(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${money(p.price)}</span></div></div>
-    </a></div>`).join('');
+  const featured = products.filter(p => p.featured).slice(0, 8);
+  $('#shop').innerHTML = featured.map(productCard).join('');
+  $('.shop-all').textContent = `SHOP ALL ${products.length} PIECES →`;
 
   $('.m-strip').innerHTML = featured.map((p, i) => `
     <a class="m-card${i < 2 ? (i ? ' sh-yel' : ' sh-red') : ''}" href="${url(p)}">
       <div class="m-card-img"${imgStyle(p.images.front)}></div><div class="m-card-t">${esc(p.name)} · ${money(p.price)}</div></a>`).join('');
 
-  const form = $('.signup');
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const btn = form.querySelector('button'), input = form.querySelector('input');
-    btn.disabled = true;
-    try {
-      await api('/api/subscribe', { email: input.value });
-      input.value = ''; input.placeholder = "YOU'RE ON THE LIST ⚡";
-    } catch (err) {
-      input.setCustomValidity(err.message); input.reportValidity(); input.setCustomValidity('');
-    }
-    btn.disabled = false;
-  });
 }
 
 /* ---------- Product render ---------- */
@@ -189,6 +155,10 @@ if (isProduct) {
     e.currentTarget.setAttribute('aria-pressed', on);
     e.currentTarget.textContent = on ? '♥' : '♡';
   });
+
+  $('.p-cat-link').href = `/shop.html?c=${encodeURIComponent(p.category)}`;
+  const related = site.products.filter(o => o.slug !== p.slug && o.category === p.category).slice(0, 4);
+  if (related.length) { $('.related-grid').innerHTML = related.map(productCard).join(''); $('.related').hidden = false; }
 
   $('.tryon-open').addEventListener('click', async () => (await import('./tryon.js')).openTryon(p));
 }

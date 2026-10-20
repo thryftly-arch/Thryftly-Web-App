@@ -1,6 +1,7 @@
-import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart } from './shop.js';
+import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome } from './shop.js';
 
 const site = await loadSite();
+mountChrome();
 bindSettings(site.settings);
 const bySlug = Object.fromEntries(site.products.map(p => [p.slug, p]));
 const form = $('.co-form');
@@ -85,7 +86,7 @@ form.addEventListener('submit', async e => {
           setCart([]);
           $('.co').innerHTML = `<div class="co-done"><h1 class="co-h1">YOU'RE <span class="volt">CHARGED.</span></h1>
             <span>ORDER ${esc(r.number)} IS CONFIRMED. A RECEIPT IS ON ITS WAY TO ${esc(customer.email)}.</span>
-            <a class="btn-red" href="/">BACK TO THE DROP →</a></div>`;
+            <div style="display:flex;gap:14px;flex-wrap:wrap"><a class="btn-red" href="/track.html?n=${encodeURIComponent(r.number)}">TRACK THIS ORDER →</a><a class="btn-ghost" href="/shop.html">KEEP SHOPPING</a></div></div>`;
         } catch (err) {
           msg(`Payment received but confirmation failed (${err.message}). Don't pay again — contact us with order ${order.number}.`, true);
         }
