@@ -69,7 +69,11 @@ export function mountChrome() {
         <div><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
       </div>
     </div>
-    <div class="footer-word-wrap"><div class="footer-word" data-s="footerWord"></div></div>`;
+    <div class="footer-word-wrap"><div class="footer-word" data-s="footerWord"></div></div>
+    <p class="footer-credits">3D garments: <a href="https://sketchfab.com/3d-models/t-shirt-c1a3e5eb9b5445f4b7d4be82f1127eba" target="_blank" rel="noopener">“T Shirt” by funlab117</a> ·
+      <a href="https://sketchfab.com/3d-models/oversized-hoodie-4f687fc4c4714de2a721e1aab2020fc8" target="_blank" rel="noopener">“Oversized hoodie” by Mug</a> ·
+      <a href="https://sketchfab.com/3d-models/sweatshirt-7c442e696c96455d848d964e79e29464" target="_blank" rel="noopener">“SWEATSHIRT” by CONCEAL</a> —
+      <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, simplified and recoloured.</p>`;
 
   const burger = $('.burger');
   burger?.addEventListener('click', () => burger.setAttribute('aria-expanded', $('#nav-links').classList.toggle('open')));

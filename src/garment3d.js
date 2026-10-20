@@ -18,14 +18,14 @@ const EDGE = 4; // cut the outline this many mask px inside the photo edge (drop
 // outline even where the surface is steep (otherwise the seam opens between mesh vertices).
 const ZEDGE = EDGE + 2.5;
 
-const loadImg = src => new Promise((ok, bad) => {
+export const loadImg = src => new Promise((ok, bad) => {
   const i = new Image();
   i.crossOrigin = 'anonymous';
   i.onload = () => ok(i); i.onerror = bad; i.src = src;
 });
 
 // Garment silhouette: everything not connected to the border by background-coloured pixels.
-function silhouette(img) {
+export function silhouette(img) {
   const s = MASK / Math.max(img.width, img.height);
   const w = Math.round(img.width * s), h = Math.round(img.height * s);
   const c = Object.assign(document.createElement('canvas'), { width: w, height: h });
@@ -92,7 +92,7 @@ function silhouette(img) {
 }
 
 // Two-pass chamfer distance from the outline, in mask pixels.
-function distance({ mask, w, h }) {
+export function distance({ mask, w, h }) {
   const d = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) d[i] = mask[i] ? 1e9 : 0;
   const pass = (y, x, dy, dx) => {

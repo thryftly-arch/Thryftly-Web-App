@@ -306,10 +306,10 @@ if (ringEl) {
 /* ---------- Product: 3D garment viewer ---------- */
 const viewer = $('.viewer');
 if (viewer) {
-  let g3d = null;
+  let g3d = null, gm = null;
   const tt = spinner(viewer, $('.turntable'), {
     speed: 30,
-    apply: a => { $('.turntable').style.transform = `rotateY(${a}deg)`; g3d?.setAngle(a); },
+    apply: a => { $('.turntable').style.transform = `rotateY(${a}deg)`; g3d?.setAngle(a); gm?.setAngle(a); },
   });
   const photo = $('.viewer-photo');
   $$('.thumb').forEach(b => b.addEventListener('click', () => {
@@ -325,21 +325,29 @@ if (viewer) {
   }));
   viewer.addEventListener('pointerdown', e => { if (!e.target.closest('button')) { tt.paused = false; photo.hidden = true; } });
 
-  // Build the 3D garment from the photos; keep the flat card when a photo can't be cut out.
+  // Best available view: a real 3D garment model dressed with this colour's fabric and print,
+  // else the photo turned into 3D, else the flat photo card.
   let pending = Promise.resolve();
   const rebuild = ({ front, back }) => (pending = pending.then(async () => {
-    if (!front) return viewer.classList.remove('is-3d');
+    viewer.classList.remove('is-3d', 'is-model');
+    if (!front) return;
     try {
+      const { modelFor, mountModel } = await import('./garmentModel.js');
+      const type = modelFor(product);
+      if (type) {
+        gm ||= await mountModel($('.g3d-model'));
+        if (gm && await gm.build({ type, front, back, prints: { front: product.printFront, back: product.printBack } })) return viewer.classList.add('is-model');
+      }
       g3d ||= await (await import('./garment3d.js')).mountGarment($('.g3d'));
       viewer.classList.toggle('is-3d', !!(g3d && await g3d.build(front, back)));
-    } catch { viewer.classList.remove('is-3d'); }
+    } catch (e) { console.warn('3D view unavailable', e); }
   }));
   window.addEventListener('thryftly:shots', e => rebuild(e.detail));
   rebuild(currentShots);
 
   if (!reduced) {
     gsap.from('.details > *', { rotationX: -15, y: 24, opacity: 0, transformPerspective: 1200, transformOrigin: '50% 0%', stagger: 0.08, duration: 0.9, ease: 'power3.out' });
-    gsap.from('.turntable-stage, .g3d', { scale: 0.9, opacity: 0, duration: 1.2, ease: 'power3.out' });
+    gsap.from('.turntable-stage, .g3d, .g3d-model', { scale: 0.9, opacity: 0, duration: 1.2, ease: 'power3.out' });
     gsap.to(tt, { scroll: 180, ease: 'none', scrollTrigger: { trigger: viewer, start: 'top top', end: 'bottom top', scrub: SCRUB } });
   }
 }

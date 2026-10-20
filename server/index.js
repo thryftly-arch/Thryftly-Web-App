@@ -52,6 +52,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const publicProduct = p => ({
   slug: p.slug, name: p.name, edition: p.edition, price: p.price, category: p.category, badge: p.badge, badgeStyle: p.badgeStyle,
   tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images, colorImages: p.colorImages || {}, colorBacks: p.colorBacks || {},
+  model3d: p.model3d || '', printFront: p.printFront || '', printBack: p.printBack || '',
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
   sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
   unlocksAt: lockedUntil(p.id),
@@ -312,6 +313,9 @@ function readProduct(b, prev = {}) {
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
     images: Object.fromEntries(['front', 'back', 'detail', 'onBody'].map(k => [k, imgUrl(b.images?.[k])])),
     tryonImage: imgUrl(b.tryonImage),
+    // 3D viewer: which garment model ('' = from the category) and optional original print files.
+    model3d: ['tee', 'hoodie', 'sweatshirt', 'none'].includes(b.model3d) ? b.model3d : '',
+    printFront: imgUrl(b.printFront), printBack: imgUrl(b.printBack),
     featured: !!b.featured, inRotation: !!b.inRotation, active: !!b.active, sort: num(b.sort, -1e4, 1e4),
     qikink: prev.qikink, // set by the CSV import, read-only here
   };

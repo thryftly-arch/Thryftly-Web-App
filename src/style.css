@@ -127,6 +127,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .footer-cols div { display: flex; flex-direction: column; }
 .footer-cols a:hover { color: var(--red); }
 .footer-word-wrap { perspective: 900px; }
+.footer-credits { font: 500 10px/1.6 var(--mono); color: rgba(0,0,0,.55); }
+.footer-credits a { text-decoration: underline; }
 .footer-word { font-stretch: 125%; font-weight: 900; font-style: italic; font-size: clamp(64px, 14.4vw, 208px); line-height: .8; letter-spacing: -.04em; color: var(--red); -webkit-text-stroke: 3px #000; text-shadow: 6px 6px 0 #000; white-space: nowrap; transform-origin: 50% 100%; }
 
 /* ---------- Product page ---------- */
@@ -237,10 +239,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .shop-all-row { display: flex; justify-content: center; padding: 0 var(--gut) 96px; margin-top: -40px; }
 
 /* ---------- 3D garment viewer ---------- */
+/* Desktop: the viewer stays on screen at full height while the details column scrolls. */
+@media (min-width: 1081px) {
+  .pdp .viewer { position: sticky; top: 0; height: calc(100vh - 81px); min-height: 600px; align-self: start; }
+}
 .g3d { position: absolute; inset: 70px 0 130px; z-index: 1; }
 .g3d canvas { width: 100% !important; height: 100% !important; display: block; }
-.viewer:not(.is-3d) .g3d { visibility: hidden; }
-.viewer.is-3d .turntable-stage { visibility: hidden; }
+.viewer:not(.is-3d) .g3d:not(.g3d-model), .viewer:not(.is-model) .g3d-model { visibility: hidden; }
+.viewer.is-3d .turntable-stage, .viewer.is-model .turntable-stage { visibility: hidden; }
 .viewer-photo { position: absolute; inset: 70px 32px 130px; width: calc(100% - 64px); height: calc(100% - 200px); object-fit: contain; z-index: 2; background: var(--ink); }
 .thumbs { z-index: 3; }
 

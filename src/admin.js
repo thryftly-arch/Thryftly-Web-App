@@ -158,6 +158,7 @@ function editProduct(src) {
       ${f('fitLabel', 'FIT LABEL', '', 'e.g. FITS LIKE XL')}${f('tag', 'TAG')}
       ${f('badge', 'BADGE', '', 'e.g. 1 OF 1, LAST ONE')}
       <label class="adm-field">BADGE COLOUR<select name="badgeStyle"><option value="yellow">Yellow</option><option value="red">Red</option></select></label>
+      <label class="adm-field">3D MODEL <small>automatic picks it from the category</small><select name="model3d"><option value="">Automatic</option><option value="tee">T-shirt</option><option value="hoodie">Hoodie</option><option value="sweatshirt">Sweatshirt</option><option value="none">No 3D model</option></select></label>
       ${f('ringLabel', 'RING PLACEHOLDER LABEL', '', 'shown when no image')}${f('sort', 'SORT ORDER', '', 'lower = first')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
       ${p.qikink ? `<p class="adm-note full" style="grid-column:1/-1;margin:0">QIKINK #${esc(p.qikink.productId)} · ${esc(p.qikink.baseCode)} · ${p.qikink.colors} colours · ${p.qikink.variants} variants on Qikink · cost ${esc(symbol)}${p.qikink.cost} → margin <b class="margin"></b></p>` : ''}
@@ -165,12 +166,13 @@ function editProduct(src) {
         <div class="adm-row" style="grid-template-columns:1fr auto;margin:6px 0"><input class="gen-colors" placeholder="Colours, comma separated (e.g. Black, Bone, Red)"><button type="button" class="gen">MAKE COLOUR × SIZE ROWS</button></div>
         <div class="adm-rows"></div><button type="button" class="adm-add">+ ADD VARIANT</button></div>
       <div class="adm-field full specs-box">SPECS<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SPEC</button></div>
-      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Each colour can have its own front and back photo, shown when a customer picks that colour (save and reopen after adding colours). A colour with no back photo gets a plain back in its own colour. Try-on works best with a transparent PNG cut-out.</small><div class="adm-imgs"></div></div>
+      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Each colour can have its own front and back photo, shown when a customer picks that colour (save and reopen after adding colours). A colour with no back photo gets a plain back in its own colour. Try-on works best with a transparent PNG cut-out. The 3D view cuts each print out of the mockups automatically; upload the original print PNG (the file you give Qikink) to make it sharper.</small><div class="adm-imgs"></div></div>
       <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> LIVE ON SITE</label><label><input type="checkbox" name="featured"> IN PRODUCT GRID</label><label><input type="checkbox" name="inRotation"> IN THE ROTATION RING</label></div>
       <div class="adm-actions">${p.id ? '<button type="button" class="adm-danger del">DELETE PRODUCT</button>' : '<span></span>'}<button class="btn-red">SAVE PRODUCT</button></div>
     </form>`;
   const form = $('.adm-form', main());
   form.badgeStyle.value = p.badgeStyle;
+  form.model3d.value = p.model3d || '';
   ['active', 'featured', 'inRotation'].forEach(k => (form[k].checked = !!p[k]));
   const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'price', ph: 'Price*', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '', price: 0 }));
   // Expand colours × existing sizes, keeping any SKUs already typed in.
@@ -190,6 +192,9 @@ function editProduct(src) {
   const imgs = $('.adm-imgs', form);
   [['front', 'FRONT'], ['back', 'BACK'], ['detail', 'DETAIL'], ['onBody', 'ON BODY']].forEach(([k, l]) => imgs.append(imgField(l, p.images[k], v => (p.images[k] = v))));
   imgs.append(imgField('TRY-ON CUT-OUT', p.tryonImage, v => (p.tryonImage = v)));
+  // Optional original print files: replace the print the 3D viewer cuts out of the mockups.
+  imgs.append(imgField('PRINT FILE — FRONT', p.printFront, v => (p.printFront = v)));
+  imgs.append(imgField('PRINT FILE — BACK', p.printBack, v => (p.printBack = v)));
   p.colorImages ||= {};
   p.colorBacks ||= {};
   for (const c of [...new Set(p.sizes.map(v => v.color).filter(Boolean))]) {
