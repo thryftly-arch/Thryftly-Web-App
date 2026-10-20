@@ -152,6 +152,11 @@ if (isProduct) {
     $('.sizes:not(.colors) .sizes-row').innerHTML = vs.map(v =>
       `<button class="size${v.label === size ? ' on' : ''}" ${v.available ? '' : 'disabled'} aria-pressed="${v.label === size}">${esc(v.label)}</button>`).join('');
     $$('.sizes:not(.colors) .size').forEach(b => b.addEventListener('click', () => { size = b.textContent; drawVariants(); }));
+    // Variants can cost more (e.g. 3XL) and each colour can have its own mockup.
+    const v = vs.find(v => v.label === size);
+    $('.p-price').textContent = money(v?.price || p.price);
+    const shot = p.colorImages?.[color];
+    if (shot || colors.length) { const f = $('.tt-front'); f.style.backgroundImage = cssUrl(shot || p.images.front); f.classList.toggle('has-img', !!(shot || p.images.front)); }
     add.disabled = !size;
     if (!size) add.textContent = 'SOLD OUT';
     else if (add.textContent === 'SOLD OUT') add.textContent = 'ADD TO CART →';
@@ -237,7 +242,8 @@ if (viewer) {
   $$('.thumb').forEach(b => b.addEventListener('click', () => {
     $$('.thumb').forEach(x => x.classList.toggle('on', x === b));
     // DETAIL / ON BODY swap their photo onto the front face
-    const u = product.images[b.dataset.img];
+    const sel = $('.colors-row .size.on')?.textContent;
+    const u = b.dataset.img === 'front' ? product.colorImages?.[sel] || product.images.front : product.images[b.dataset.img];
     if (b.dataset.angle === '0') {
       const front = $('.tt-front');
       front.style.backgroundImage = cssUrl(u || product.images.front);

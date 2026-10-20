@@ -50,9 +50,9 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 const publicProduct = p => ({
   slug: p.slug, name: p.name, edition: p.edition, price: p.price, category: p.category, badge: p.badge, badgeStyle: p.badgeStyle,
-  tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images,
+  tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images, colorImages: p.colorImages || {},
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
-  sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
+  sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
 });
 const activeProducts = () => db.products.filter(p => p.active).sort((a, b) => a.sort - b.sort);
 
@@ -99,7 +99,7 @@ function priceCart(items) {
     // Nothing can be printed without the Qikink SKU, so don't take money for it.
     if (I.qikinkConfigured() && !s.sku) throw new Error(`${what} can't be ordered right now`);
     if (s.stock < qty) throw new Error(`${what} is sold out`);
-    return { productId: p.id, slug: p.slug, name: p.name, size: s.label, color: s.color || '', sku: s.sku, qty, price: p.price };
+    return { productId: p.id, slug: p.slug, name: p.name, size: s.label, color: s.color || '', sku: s.sku, qty, price: s.price || p.price };
   });
   const subtotal = lines.reduce((t, l) => t + l.price * l.qty, 0);
   const { shippingFee, freeShippingOver } = db.settings;
@@ -234,7 +234,8 @@ function readProduct(b, prev = {}) {
     badge: str(b.badge, 20).toUpperCase(), badgeStyle: b.badgeStyle === 'red' ? 'red' : 'yellow', tag: str(b.tag, 40).toUpperCase(),
     color: str(b.color, 40).toUpperCase(), fitLabel: str(b.fitLabel, 40).toUpperCase(), description: str(b.description, 2000),
     ringLabel: str(b.ringLabel, 40),
-    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 120).map(s => ({ label: str(s.label, 10).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50) })).filter(s => s.label),
+    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 10).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0 })).filter(s => s.label),
+    colorImages: Object.fromEntries(Object.entries(b.colorImages || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
     images: Object.fromEntries(['front', 'back', 'detail', 'onBody'].map(k => [k, imgUrl(b.images?.[k])])),
     tryonImage: imgUrl(b.tryonImage),
@@ -292,6 +293,70 @@ admin.post('/orders/sync', wrap(async (req, res) => {
   }
   save();
   res.json({ synced: open.length });
+}));
+
+// Shopify → our store. Images are copied to our own disk, since Shopify's CDN goes away with the store.
+async function downloadImage(url) {
+  if (!/^https:\/\//.test(url)) return '';
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  const type = (res.headers.get('content-type') || '').split(';')[0];
+  if (!res.ok || !EXT[type]) return '';
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > 8 * 1024 * 1024) return '';
+  const name = Date.now().toString(36) + crypto.randomBytes(6).toString('hex') + EXT[type];
+  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  return '/uploads/' + name;
+}
+
+admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap(async (req, res) => {
+  let rows;
+  try { rows = I.parseShopifyCsv(String(req.body || '')); } catch (e) { return fail(res, 400, e.message); }
+
+  // Download every distinct image, 6 at a time. Failures keep the Shopify URL so nothing is lost.
+  const urls = [...new Set(rows.flatMap(r => [...r.gallery, ...Object.values(r.colorImages)]))];
+  const local = {};
+  let failed = 0;
+  for (let i = 0; i < urls.length; i += 6) {
+    await Promise.all(urls.slice(i, i + 6).map(async u => {
+      // Re-imports reuse images already copied from the same Shopify URL.
+      const have = db.importedImages?.[u];
+      if (have && fs.existsSync(path.join(UPLOAD_DIR, path.basename(have)))) return void (local[u] = have);
+      try { local[u] = (await downloadImage(u)) || u; } catch { local[u] = u; }
+      if (local[u] !== u) (db.importedImages ||= {})[u] = local[u];
+      if (local[u] === u) failed++;
+    }));
+  }
+  const L = u => (u ? local[u] || u : '');
+
+  let added = 0, updated = 0;
+  for (const r of rows) {
+    const name = r.title.toUpperCase().slice(0, 80);
+    let slug = r.handle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const prev = db.products.find(p => p.slug === slug || p.name === name);
+    const variants = r.variants.map(v => ({ label: v.label.slice(0, 10), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
+    const [front = '', back = '', detail = '', onBody = ''] = r.gallery.map(L);
+    const fields = {
+      name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || prev?.category || 'APPAREL').toUpperCase().slice(0, 40),
+      sizes: variants, colorImages: Object.fromEntries(Object.entries(r.colorImages).map(([c, u]) => [c, L(u)])),
+      images: { front, back, detail, onBody }, shopify: { handle: r.handle, status: r.status },
+    };
+    if (prev) {
+      Object.assign(prev, fields);
+      updated++;
+    } else {
+      while (db.products.some(p => p.slug === slug)) slug += '-2';
+      db.products.push({
+        id: id(), slug, edition: '', badge: '', badgeStyle: 'yellow', tag: '', color: '', fitLabel: '', specs: [], tryonImage: '',
+        ringLabel: r.title.toLowerCase(), featured: true, inRotation: true, sort: 100 + db.products.length,
+        // Go live straight away only if it was live on Shopify and every variant can be fulfilled.
+        active: r.status === 'active' && variants.every(v => v.sku),
+        ...fields,
+      });
+      added++;
+    }
+  }
+  save();
+  res.json({ added, updated, images: urls.length - failed, imagesFailed: failed });
 }));
 
 // Import the "My Products" CSV exported from the Qikink dashboard. It has names, prices and

@@ -21,12 +21,13 @@ async function render() {
   form.hidden = false;
   $('.co-lines').innerHTML = items.map((i, n) => {
     const p = bySlug[i.slug];
+    const v = p.sizes.find(v => v.label === i.size && (v.color || '') === (i.color || ''));
     return `<div class="co-line">
-      <div class="co-thumb" style="background-image:${esc(cssUrl(p.images.front))}"></div>
+      <div class="co-thumb" style="background-image:${esc(cssUrl(p.colorImages?.[i.color] || p.images.front))}"></div>
       <div><div class="co-name">${esc(p.name)}</div><div class="co-meta">${esc(i.size)} · ${esc(i.color || p.color)}</div>
         <div class="co-qty"><button type="button" data-n="${n}" data-d="-1" aria-label="Less">−</button>${i.qty}<button type="button" data-n="${n}" data-d="1" aria-label="More">+</button>
         <button type="button" class="co-remove" data-n="${n}">REMOVE</button></div></div>
-      <div class="co-price">${money(p.price * i.qty)}</div></div>`;
+      <div class="co-price">${money((v?.price || p.price) * i.qty)}</div></div>`;
   }).join('');
   try {
     const q = await api('/api/cart/quote', { items });

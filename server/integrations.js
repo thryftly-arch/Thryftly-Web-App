@@ -175,3 +175,58 @@ export function parseQikinkCsv(text) {
     };
   }).filter(p => p.productId);
 }
+
+/* ---------------- Shopify product export (migration off Shopify) ---------------- */
+// Shopify's Products → Export CSV: one row per variant, extra rows per image, grouped by Handle.
+// Variant SKUs are the ones Qikink created when it pushed the product, so orders map 1:1.
+const htmlToText = h => String(h || '')
+  .replace(/<(br|\/p|\/li|\/h\d)\s*\/?>/gi, '\n').replace(/<li[^>]*>/gi, '• ').replace(/<[^>]+>/g, '')
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+  .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+
+export function parseShopifyCsv(text) {
+  const [head, ...rows] = csvRows(text.replace(/^﻿/, ''));
+  const ix = Object.fromEntries(head.map((h, i) => [h.trim(), i]));
+  if (ix.Handle == null || ix['Variant SKU'] == null) throw new Error('Not a Shopify products export (missing Handle / Variant SKU columns)');
+  const get = (r, k) => (ix[k] == null ? '' : (r[ix[k]] || '').trim());
+  const byHandle = new Map();
+  for (const r of rows) {
+    const handle = get(r, 'Handle');
+    if (!handle) continue;
+    let p = byHandle.get(handle);
+    if (!p) byHandle.set(handle, (p = { handle, variants: [], images: [], optionNames: [] }));
+    // Product-level fields only appear on the first row of each handle.
+    if (get(r, 'Title')) {
+      Object.assign(p, { title: get(r, 'Title'), description: htmlToText(get(r, 'Body (HTML)')), type: get(r, 'Type'), tags: get(r, 'Tags'), status: (get(r, 'Status') || 'active').toLowerCase() });
+      p.optionNames = [1, 2, 3].map(n => get(r, `Option${n} Name`));
+    }
+    const src = get(r, 'Image Src');
+    if (src && !p.images.some(i => i.src === src)) p.images.push({ src, position: +get(r, 'Image Position') || 99, alt: get(r, 'Image Alt Text') });
+    const opts = [1, 2, 3].map(n => get(r, `Option${n} Value`));
+    if (get(r, 'Variant SKU') || opts[0]) {
+      const tracked = get(r, 'Variant Inventory Tracker') === 'shopify' && ix['Variant Inventory Qty'] != null;
+      p.variants.push({ opts, sku: get(r, 'Variant SKU'), price: Number(get(r, 'Variant Price')) || 0, stock: tracked ? Math.max(0, +get(r, 'Variant Inventory Qty') || 0) : 999, image: get(r, 'Variant Image') });
+    }
+  }
+  return [...byHandle.values()].filter(p => p.title).map(p => {
+    const ci = p.optionNames.findIndex(n => /colou?r/i.test(n));
+    let si = p.optionNames.findIndex(n => /size/i.test(n));
+    if (si < 0) si = p.optionNames.findIndex((n, i) => n && i !== ci && !/^title$/i.test(n));
+    const variants = p.variants.map(v => ({
+      color: ci >= 0 ? v.opts[ci].toUpperCase() : '',
+      label: (si >= 0 && v.opts[si] ? v.opts[si] : 'OS').toUpperCase().replace(/^DEFAULT TITLE$/, 'OS'),
+      sku: v.sku, price: v.price, stock: v.stock, image: v.image,
+    }));
+    const colorImages = {};
+    for (const v of variants) if (v.color && v.image && !colorImages[v.color]) colorImages[v.color] = v.image;
+    // Gallery = images in position order, minus the mockups that belong to other colours.
+    const firstColor = variants.find(v => v.color)?.color;
+    const others = new Set(Object.entries(colorImages).filter(([c]) => c !== firstColor).map(([, u]) => u));
+    const gallery = p.images.sort((a, b) => a.position - b.position).map(i => i.src).filter(u => !others.has(u));
+    return {
+      handle: p.handle, title: p.title, description: p.description, type: p.type, status: p.status,
+      price: Math.min(...variants.map(v => v.price).filter(Boolean)) || 0,
+      variants, colorImages, gallery,
+    };
+  });
+}

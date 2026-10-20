@@ -32,3 +32,19 @@ assert.equal(c.baseCode, 'UH26');
 assert.deepEqual(c.sizes, ['S', 'M', 'L']);
 assert.equal(c.price, 599);
 console.log('qikink csv checks ok');
+
+// Shopify export: variants, per-colour images and gallery.
+const shop = `Handle,Title,Body (HTML),Type,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Variant SKU,Variant Inventory Tracker,Variant Price,Image Src,Image Position,Variant Image,Status
+ns-hoodie,NS Hoodie,<p>Heavy &amp; warm</p>,Hoodie,Color,Black,Size,S,QK-NS-BK-S,,1999,https://cdn.shopify.com/a.jpg,1,https://cdn.shopify.com/a.jpg,active
+ns-hoodie,,,,,Black,,3XL,QK-NS-BK-3XL,,2099,https://cdn.shopify.com/b.jpg,2,https://cdn.shopify.com/a.jpg,
+ns-hoodie,,,,,Bone,,S,QK-NS-BN-S,,1999,https://cdn.shopify.com/c.jpg,3,https://cdn.shopify.com/c.jpg,
+plain-cap,Plain Cap,,Cap,Title,Default Title,,,QK-CAP,,599,,,,draft`;
+const [ns, cap] = I.parseShopifyCsv(shop);
+assert.equal(ns.description, 'Heavy & warm');
+assert.equal(ns.price, 1999);
+assert.deepEqual(ns.variants.map(v => [v.color, v.label, v.sku, v.price]), [['BLACK', 'S', 'QK-NS-BK-S', 1999], ['BLACK', '3XL', 'QK-NS-BK-3XL', 2099], ['BONE', 'S', 'QK-NS-BN-S', 1999]]);
+assert.deepEqual(ns.colorImages, { BLACK: 'https://cdn.shopify.com/a.jpg', BONE: 'https://cdn.shopify.com/c.jpg' });
+assert.deepEqual(ns.gallery, ['https://cdn.shopify.com/a.jpg', 'https://cdn.shopify.com/b.jpg']);
+assert.deepEqual(cap.variants.map(v => [v.color, v.label]), [['', 'OS']]);
+assert.equal(cap.status, 'draft');
+console.log('shopify csv checks ok');

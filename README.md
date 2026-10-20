@@ -47,6 +47,14 @@ Put it behind HTTPS (Caddy, nginx, or your host's proxy). In production the serv
 
 Prices are always recalculated on the server. Payments are only accepted with a valid Razorpay signature, and `npm run check` tests that signature check.
 
+### Moving off Shopify (do this before closing the store)
+1. In Shopify Admin → **Products → Export**, choose **All products**, and export as a **CSV for Excel, Numbers, or other spreadsheet programs**.
+2. In this admin, go to Products → **Import Shopify CSV**.
+
+Every product comes across with its description, colours, sizes, the variant SKUs Qikink created when it pushed the product, prices (including higher prices on bigger sizes), the gallery images and a mockup for each colour. Images are **copied onto this server**, because Shopify's image links stop working once the store closes. Re-importing updates existing products without downloading the same images again. Products that were active on Shopify, with a SKU on every variant, go live straight away.
+
+New products after the move: create the product in Qikink, then in Admin → Products add it with **+ New product**. Use **Make colour × size rows**, paste the SKUs from Qikink, and upload the mockups. Each colour has its own image slot.
+
 ### Fulfilment: Qikink
 Qikink's API ([docs](https://documenter.getpostman.com/view/26157218/2sBYAysUHS)) only covers authentication and orders. There is **no product catalogue endpoint**, so products are brought in like this:
 1. In the Qikink dashboard, export **My Products** as a CSV. Go to Admin → Products → **Import Qikink CSV**. Each product is created **hidden**, with its name, selling price, size range, print type and Qikink cost (the admin shows your margin). Importing the same file again skips products that are already there.

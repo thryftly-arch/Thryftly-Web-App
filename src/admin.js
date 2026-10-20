@@ -98,8 +98,8 @@ function rows(container, items, cols, blank) {
 async function viewProducts() {
   const products = await req('GET', '/products');
   main().innerHTML = `
-    <div class="adm-bar"><h1 class="adm-h">PRODUCTS</h1><div style="display:flex;gap:12px"><label class="btn-ghost">IMPORT QIKINK CSV<input type="file" accept=".csv,text/csv" class="csv" hidden></label><button class="btn-red new">+ NEW PRODUCT</button></div></div>
-    <p class="adm-note">Qikink has no catalogue API. Import the “My Products” CSV from the Qikink dashboard to create products (they arrive hidden), then add each colour × size SKU from Qikink. A variant without a SKU can't be bought. Paid orders go to Qikink automatically.</p>
+    <div class="adm-bar"><h1 class="adm-h">PRODUCTS</h1><div style="display:flex;gap:12px"><label class="btn-ghost">IMPORT SHOPIFY CSV<input type="file" accept=".csv,text/csv" class="shopify" hidden></label><label class="btn-ghost">IMPORT QIKINK CSV<input type="file" accept=".csv,text/csv" class="csv" hidden></label><button class="btn-red new">+ NEW PRODUCT</button></div></div>
+    <p class="adm-note">Qikink has no catalogue API. Moving from Shopify: export Products → CSV in Shopify and import it here. Colours, sizes, Qikink SKUs, prices and every image come across, and images are copied to this server. (Qikink's own CSV has no colours, SKUs or images, so it only creates hidden drafts.) A variant without a SKU can't be bought. Paid orders go to Qikink automatically.</p>
     <table class="adm-table"><thead><tr><th></th><th>NAME</th><th>PRICE</th><th class="hide-sm">STOCK</th><th class="hide-sm">QIKINK SKUs</th><th class="hide-sm">SHOWN IN</th><th>STATUS</th><th></th></tr></thead><tbody></tbody></table>`;
   const tb = $('tbody', main());
   for (const p of products) {
@@ -117,6 +117,18 @@ async function viewProducts() {
     $('button', tr).addEventListener('click', () => editProduct(p));
     tb.append(tr);
   }
+  $('.shopify', main()).addEventListener('change', async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    toast('IMPORTING — COPYING IMAGES FROM SHOPIFY, THIS CAN TAKE A FEW MINUTES…');
+    try {
+      const r = await fetch('/api/admin/import/shopify', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await f.text() });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      toast(`ADDED ${j.added} · UPDATED ${j.updated} · ${j.images} IMAGES COPIED${j.imagesFailed ? ` · ${j.imagesFailed} FAILED` : ''}`, !!j.imagesFailed);
+      viewProducts();
+    } catch (err) { toast(err.message, true); }
+  });
   $('.csv', main()).addEventListener('change', async e => {
     const f = e.target.files[0];
     if (!f) return;
@@ -149,18 +161,18 @@ function editProduct(src) {
       ${f('ringLabel', 'RING PLACEHOLDER LABEL', '', 'shown when no image')}${f('sort', 'SORT ORDER', '', 'lower = first')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
       ${p.qikink ? `<p class="adm-note full" style="grid-column:1/-1;margin:0">QIKINK #${esc(p.qikink.productId)} · ${esc(p.qikink.baseCode)} · ${p.qikink.colors} colours · ${p.qikink.variants} variants on Qikink · cost ${esc(symbol)}${p.qikink.cost} → margin <b class="margin"></b></p>` : ''}
-      <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand.</small>
+      <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand. *Price only if this variant costs more than the product price.</small>
         <div class="adm-row" style="grid-template-columns:1fr auto;margin:6px 0"><input class="gen-colors" placeholder="Colours, comma separated (e.g. Black, Bone, Red)"><button type="button" class="gen">MAKE COLOUR × SIZE ROWS</button></div>
         <div class="adm-rows"></div><button type="button" class="adm-add">+ ADD VARIANT</button></div>
       <div class="adm-field full specs-box">SPECS<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SPEC</button></div>
-      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Try-on works best with a transparent PNG cut-out of the garment.</small><div class="adm-imgs"></div></div>
+      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Each colour can have its own photo, shown when a customer picks that colour (save and reopen after adding colours). Try-on works best with a transparent PNG cut-out.</small><div class="adm-imgs"></div></div>
       <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> LIVE ON SITE</label><label><input type="checkbox" name="featured"> IN PRODUCT GRID</label><label><input type="checkbox" name="inRotation"> IN THE ROTATION RING</label></div>
       <div class="adm-actions">${p.id ? '<button type="button" class="adm-danger del">DELETE PRODUCT</button>' : '<span></span>'}<button class="btn-red">SAVE PRODUCT</button></div>
     </form>`;
   const form = $('.adm-form', main());
   form.badgeStyle.value = p.badgeStyle;
   ['active', 'featured', 'inRotation'].forEach(k => (form[k].checked = !!p[k]));
-  const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '' }));
+  const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'price', ph: 'Price*', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '', price: 0 }));
   // Expand colours × existing sizes, keeping any SKUs already typed in.
   $('.gen', form).addEventListener('click', () => {
     const colors = $('.gen-colors', form).value.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
@@ -178,6 +190,8 @@ function editProduct(src) {
   const imgs = $('.adm-imgs', form);
   [['front', 'FRONT'], ['back', 'BACK'], ['detail', 'DETAIL'], ['onBody', 'ON BODY']].forEach(([k, l]) => imgs.append(imgField(l, p.images[k], v => (p.images[k] = v))));
   imgs.append(imgField('TRY-ON CUT-OUT', p.tryonImage, v => (p.tryonImage = v)));
+  p.colorImages ||= {};
+  for (const c of [...new Set(p.sizes.map(v => v.color).filter(Boolean))]) imgs.append(imgField(`COLOUR: ${c}`, p.colorImages[c], v => (p.colorImages[c] = v)));
 
   $('.back', main()).addEventListener('click', viewProducts);
   $('.del', main())?.addEventListener('click', async () => {
