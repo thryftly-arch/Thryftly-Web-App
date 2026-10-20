@@ -197,7 +197,7 @@ export function parseShopifyCsv(text) {
     if (!p) byHandle.set(handle, (p = { handle, variants: [], images: [], optionNames: [] }));
     // Product-level fields only appear on the first row of each handle.
     if (get(r, 'Title')) {
-      Object.assign(p, { title: get(r, 'Title'), description: htmlToText(get(r, 'Body (HTML)')), type: get(r, 'Type'), tags: get(r, 'Tags'), status: (get(r, 'Status') || 'active').toLowerCase() });
+      Object.assign(p, { title: get(r, 'Title'), description: htmlToText(get(r, 'Body (HTML)')), type: get(r, 'Type'), productCategory: get(r, 'Product Category'), tags: get(r, 'Tags'), status: (get(r, 'Status') || 'active').toLowerCase() });
       p.optionNames = [1, 2, 3].map(n => get(r, `Option${n} Name`));
     }
     const src = get(r, 'Image Src');
@@ -228,7 +228,7 @@ export function parseShopifyCsv(text) {
     const others = new Set(Object.entries(colorImages).filter(([c]) => c !== firstColor).map(([, u]) => u));
     const gallery = p.images.sort((a, b) => a.position - b.position).map(i => i.src).filter(u => !others.has(u));
     return {
-      handle: p.handle, title: p.title, description: p.description, type: p.type, status: p.status,
+      handle: p.handle, title: p.title, description: p.description, type: p.type, productCategory: p.productCategory || '', status: p.status,
       price: Math.min(...variants.map(v => v.price).filter(Boolean)) || 0,
       variants, colorImages, gallery,
     };

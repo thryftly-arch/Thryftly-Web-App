@@ -337,7 +337,12 @@ admin.post('/orders/sync', wrap(async (req, res) => {
 }));
 
 // Shopify's Type column is often empty, so file products by what their title says.
-const categoryOf = t => [[/zip|hood/i, 'HOODIES'], [/sweatshirt/i, 'SWEATSHIRTS'], [/varsity|jacket/i, 'JACKETS'], [/sweatpant|jogger|pant/i, 'BOTTOMS'], [/tee|t-shirt|tshirt/i, 'TEES'], [/shirt/i, 'SHIRTS']].find(([re]) => re.test(t))?.[1] || 'APPAREL';
+// Shopify's own taxonomy ("… > Clothing Tops > Hoodies") wins; the title is the fallback.
+const categoryOf = (title, taxonomy = '') => {
+  const rules = [[/zip|hood/i, 'HOODIES'], [/sweatshirt/i, 'SWEATSHIRTS'], [/varsity|jacket|coat/i, 'JACKETS'], [/sweatpant|jogger|\bpants?\b|trouser/i, 'BOTTOMS'], [/\btees?\b|t-shirt|tshirt/i, 'TEES'], [/shirt/i, 'SHIRTS']];
+  const pick = t => rules.find(([re]) => re.test(t))?.[1];
+  return pick(taxonomy.split('>').pop()) || pick(title) || 'APPAREL';
+};
 
 // Shopify → our store. Images are copied to our own disk, since Shopify's CDN goes away with the store.
 async function downloadImage(url) {
@@ -397,7 +402,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
     const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
     const [front = '', back = '', detail = '', onBody = ''] = r.gallery.map(L);
     const fields = {
-      name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || categoryOf(r.title)).toUpperCase().slice(0, 40),
+      name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || categoryOf(r.title, r.productCategory)).toUpperCase().slice(0, 40),
       sizes: variants, colorImages: Object.fromEntries(Object.entries(r.colorImages).map(([c, u]) => [c, L(u)])),
       images: { front, back, detail, onBody }, shopify: { handle: r.handle, status: r.status },
     };
