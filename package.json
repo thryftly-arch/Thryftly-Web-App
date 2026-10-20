@@ -8,7 +8,9 @@
     "dev:web": "vite",
     "build": "vite build",
     "start": "node server/index.js",
-    "check": "node server/check.js"
+    "check": "node server/check.js && node server/check-supabase.js",
+    "build:netlify": "vite build && node tools/netlify-redirects.js",
+    "push:supabase": "node tools/push-to-supabase.js"
   },
   "dependencies": {
     "compression": "^1.8.2",
@@ -17,6 +19,7 @@
     "gsap": "^3.12.5",
     "helmet": "^8.3.0",
     "multer": "^2.4.0",
+    "serverless-http": "^3.2.0",
     "three": "^0.170.0"
   },
   "devDependencies": {

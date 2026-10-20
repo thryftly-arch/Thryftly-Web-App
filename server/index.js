@@ -9,15 +9,20 @@ import multer from 'multer';
 
 try { process.loadEnvFile(); } catch { /* no .env: rely on real env vars */ }
 
-const { db, save, id, UPLOAD_DIR, DATA_DIR } = await import('./store.js');
+const S = await import('./store.js');
+const { db, save, id, UPLOAD_DIR, DATA_DIR } = S;
 const I = await import('./integrations.js');
 
-const PROD = process.env.NODE_ENV === 'production';
+// LAMBDA: running as the Netlify function (netlify/functions/api.mjs), not as a long-lived server.
+const LAMBDA = !!process.env.LAMBDA_TASK_ROOT;
+const PROD = process.env.NODE_ENV === 'production' || LAMBDA;
 const PORT = +process.env.PORT || 3000;
 const siteUrl = () => (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 const SESSION_SECRET = process.env.SESSION_SECRET || (PROD ? '' : 'dev-only-secret');
 if (PROD && (!SESSION_SECRET || !process.env.ADMIN_PASSWORD)) {
-  console.error('Refusing to start: set SESSION_SECRET and ADMIN_PASSWORD in production.');
+  const msg = 'Refusing to start: set SESSION_SECRET and ADMIN_PASSWORD in production.';
+  if (LAMBDA) throw new Error(msg);
+  console.error(msg);
   process.exit(1);
 }
 
@@ -66,6 +71,28 @@ const lockedUntil = id => {
   const d = liveDrops().find(d => d.productIds.includes(id) && d.startsAt && Date.parse(d.startsAt) > Date.now());
   return d ? d.startsAt : '';
 };
+
+/* ---------------- Supabase: fresh data in, every change saved before the reply ---------------- */
+// Reads use data at most 5s old. A write waits its turn, reloads, and its reply is held until the save lands,
+// so nothing is lost when Netlify freezes the function after replying.
+app.use(['/api', '/wp-json'], wrap(async (req, res, next) => {
+  if (!S.remote) return next();
+  const json = res.json.bind(res);
+  res.json = body => {
+    const p = S.flush();
+    if (!p) return json(body);
+    p.then(() => json(body), e => { console.error(e); res.status(500); json({ error: 'Could not save. Try again.' }); });
+    return res;
+  };
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    if (!S.isBusy()) await S.load(5000);
+    return next();
+  }
+  const release = await S.lock();
+  res.once('finish', release); res.once('close', release);
+  try { await S.load(); } catch (e) { release(); throw e; }
+  next();
+}));
 
 /* ---------------- Razorpay webhook (needs the raw body, so before express.json) ---------------- */
 app.post('/api/webhooks/razorpay', express.raw({ type: '*/*', limit: '1mb' }), wrap(async (req, res) => {
@@ -329,24 +356,51 @@ admin.put('/products/:id', (req, res) => {
   if (i < 0) return fail(res, 404, 'not found');
   try { db.products[i] = readProduct(req.body, db.products[i]); save(); res.json(db.products[i]); } catch (e) { fail(res, 400, e.message); }
 });
+// Bulk switch: live / grid / ring for many products at once.
+admin.patch('/products', (req, res) => {
+  const ids = new Set(Array.isArray(req.body.ids) ? req.body.ids : []), set = {};
+  for (const k of ['active', 'featured', 'inRotation']) if (typeof req.body.set?.[k] === 'boolean') set[k] = req.body.set[k];
+  if (!ids.size || !Object.keys(set).length) return fail(res, 400, 'Nothing to change');
+  let changed = 0;
+  for (const p of db.products) if (ids.has(p.id)) { Object.assign(p, set); changed++; }
+  save(); res.json({ changed });
+});
 admin.delete('/products/:id', (req, res) => {
   db.products = db.products.filter(p => p.id !== req.params.id); save(); res.json({ ok: true });
 });
 
 /* images */
 const EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }; // no SVG: it can carry script
+const fileName = type => Date.now().toString(36) + crypto.randomBytes(6).toString('hex') + EXT[type];
 const upload = multer({
-  storage: multer.diskStorage({ destination: UPLOAD_DIR, filename: (req, f, cb) => cb(null, Date.now().toString(36) + crypto.randomBytes(6).toString('hex') + EXT[f.mimetype]) }),
+  storage: S.remote ? multer.memoryStorage() : multer.diskStorage({ destination: UPLOAD_DIR, filename: (req, f, cb) => cb(null, fileName(f.mimetype)) }),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (req, f, cb) => cb(EXT[f.mimetype] ? null : new Error('Use PNG, JPG, WEBP or GIF'), !!EXT[f.mimetype]),
 });
-admin.post('/upload', upload.single('file'), (req, res) => res.json({ url: '/uploads/' + req.file.filename }));
-admin.get('/uploads', (req, res) => {
-  const files = fs.readdirSync(UPLOAD_DIR).filter(f => !f.startsWith('.')).map(f => ({ url: '/uploads/' + f, at: fs.statSync(path.join(UPLOAD_DIR, f)).mtimeMs }));
-  res.json(files.sort((a, b) => b.at - a.at));
-});
+admin.post('/upload', upload.single('file'), wrap(async (req, res) => {
+  if (!req.file) return fail(res, 400, 'Choose an image');
+  if (!S.remote) return res.json({ url: '/uploads/' + req.file.filename });
+  const name = fileName(req.file.mimetype);
+  await S.putFile(name, req.file.buffer, req.file.mimetype);
+  res.json({ url: '/uploads/' + name });
+}));
 
 /* orders, subscribers, Qikink */
+admin.get('/overview', (req, res) => {
+  const paid = db.orders.filter(o => o.paidAt), since = t => paid.filter(o => Date.parse(o.paidAt) >= t);
+  const day = new Date(); day.setHours(0, 0, 0, 0);
+  const sum = os => ({ orders: os.length, revenue: os.reduce((t, o) => t + o.amount, 0) });
+  const live = db.products.filter(p => p.active);
+  res.json({
+    today: sum(since(+day)), month: sum(since(Date.now() - 30 * 864e5)),
+    failed: db.orders.filter(o => o.status === 'fulfillment_failed').length,
+    unread: db.messages.filter(m => !m.read).length,
+    live: live.length, hidden: db.products.length - live.length,
+    noSku: live.filter(p => p.sizes.some(s => !s.sku)).length,
+    subscribers: db.subscribers.length, drop: liveDrops()[0]?.name || '',
+    latest: [...db.orders].reverse().slice(0, 8).map(o => ({ number: o.number, createdAt: o.createdAt, name: o.customer.name, amount: o.amount, status: o.status })),
+  });
+});
 admin.get('/orders', (req, res) => res.json([...db.orders].reverse()));
 admin.post('/orders/:id/fulfill', wrap(async (req, res) => {
   const o = db.orders.find(o => o.id === req.params.id);
@@ -392,15 +446,15 @@ async function downloadImage(url) {
   if (!res.ok || !EXT[type]) return '';
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length > 8 * 1024 * 1024) return '';
-  const name = Date.now().toString(36) + crypto.randomBytes(6).toString('hex') + EXT[type];
-  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  const name = fileName(type);
+  await S.putFile(name, buf, type);
   return '/uploads/' + name;
 }
 
 // Copy a remote image once; later imports of the same URL reuse the file. Failures keep the remote URL.
 async function localImage(url) {
   const have = db.importedImages?.[url];
-  if (have && fs.existsSync(path.join(UPLOAD_DIR, path.basename(have)))) return have;
+  if (have && (S.remote || fs.existsSync(path.join(UPLOAD_DIR, path.basename(have))))) return have;
   const got = await downloadImage(url).catch(() => '');
   if (got) (db.importedImages ||= {})[url] = got;
   return got || url;
@@ -417,6 +471,8 @@ function newImported(slugBase, title, fields) {
 }
 
 admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap(async (req, res) => {
+  // Copying hundreds of images takes minutes; a Netlify function is cut off after seconds.
+  if (LAMBDA) return fail(res, 400, 'Run Shopify imports from your computer (npm run dev with the Supabase keys in .env). See README.');
   let rows;
   try { rows = I.parseShopifyCsv(String(req.body || '')); } catch (e) { return fail(res, 400, e.message); }
 
@@ -534,7 +590,8 @@ app.use((req, res, next) => {
 });
 app.use('/wp-json', express.urlencoded({ extended: true, limit: '12mb' }), (req, res, next) => {
   const entry = { at: new Date().toISOString(), method: req.method, url: req.originalUrl.replace(/(consumer_secret=)[^&]*/, '$1***'), auth: (req.get('authorization') || '').split(' ')[0], ua: req.get('user-agent'), body: req.body };
-  fs.appendFile(path.join(DATA_DIR, 'woo-log.jsonl'), JSON.stringify(entry) + '\n', () => {});
+  if (S.remote) console.log('woo', JSON.stringify(entry)); // no disk on Netlify: it lands in the function log
+  else fs.appendFile(path.join(DATA_DIR, 'woo-log.jsonl'), JSON.stringify(entry) + '\n', () => {});
   next();
 });
 app.get('/wp-json', (req, res) => res.json({ name: db.settings.footerWord || 'THRYFTLY', url: siteUrl(), home: siteUrl(), namespaces: ['wp/v2', 'wc/v3'] }));
@@ -710,8 +767,10 @@ woo.all('/*path', wooWrap((req, res) => {
 }));
 
 /* ---------------- static ---------------- */
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
-if (PROD) {
+// With Supabase the files live in Storage (on Netlify, _redirects proxies /uploads there instead).
+if (S.remote) app.get('/uploads/:name', (req, res) => res.redirect(301, S.fileUrl(req.params.name)));
+else app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
+if (PROD && !LAMBDA) {
   const dist = path.resolve('dist');
   app.use(express.static(dist, { extensions: ['html'], setHeaders: (res, f) => { if (f.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
   app.use((req, res) => res.status(404).sendFile(path.join(dist, 'index.html')));
@@ -722,4 +781,5 @@ app.use((err, req, res, next) => {
   fail(res, err.status || (err instanceof multer.MulterError ? 400 : 500), err instanceof multer.MulterError || err.message?.startsWith('Use ') ? err.message : 'Something went wrong');
 });
 
-app.listen(PORT, () => console.log(`THRYFTLY server on http://localhost:${PORT} (${PROD ? 'production' : 'dev'})`));
+if (!LAMBDA) app.listen(PORT, () => console.log(`THRYFTLY server on http://localhost:${PORT} (${PROD ? 'production' : 'dev'}, data in ${S.remote ? 'Supabase' : DATA_DIR})`));
+export default app;

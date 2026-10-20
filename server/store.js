@@ -1,7 +1,12 @@
-// Tiny JSON-file store. Every write goes to a temp file then renames, so a crash
-// mid-write never leaves a half-written database behind.
-// ponytail: whole-file rewrite on each change, single process only. Fine for a
-// boutique catalogue + a few thousand orders; move to Postgres/SQLite past that.
+// The store is one in-memory object (db) that the routes read and change, then save().
+// Two backends:
+//  - local file (data/db.json + data/uploads/): the default, for running on your own computer or a VPS.
+//    Every write goes to a temp file then renames, so a crash never leaves half a database.
+//  - Supabase (SUPABASE_URL + SUPABASE_SECRET_KEY set): for Netlify, which has no disk. Each product,
+//    order, drop, message and subscriber is a row in table "thryftly"; settings/pages are "doc" rows.
+//    save() writes only the rows that changed, so two servers adding different orders don't collide.
+//    Images go to the public Storage bucket "uploads". See supabase/schema.sql.
+// ponytail: every request reloads the whole store (fine to a few thousand orders); past that, query per route.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -10,7 +15,10 @@ export const DATA_DIR = path.resolve(process.env.DATA_DIR || 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const SB = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+const KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const remote = !!(SB && KEY);
+if (!remote) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 export const id = () => crypto.randomBytes(8).toString('hex');
 
@@ -75,24 +83,129 @@ const SEED = () => ({
   subscribers: [],
 });
 
-export const db = fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : SEED();
-
 // Older databases miss keys added since they were created: fill those in, never overwrite.
-const seed = SEED();
-for (const [k, v] of Object.entries(seed.settings)) if (!(k in db.settings)) db.settings[k] = v;
-db.pages = { ...seed.pages, ...db.pages };
-db.messages ??= [];
-db.drops ??= [];
-// Copy that only made sense for the mockup's "Drop 07": swap it for the new defaults, but only
-// where it was never edited (still exactly the old text).
-const OLD = { liveLabel: 'DROP 07 LIVE', kicker: 'DROP 07 // STATIC SEASON // 300 UNITS', mobileKicker: 'DROP 07 // LIVE', ctaLabel: 'SHOP DROP 07 →', secondaryCta: 'VIEW LOOKBOOK', rotationTitle: 'THE ROTATION', signupTitle: 'GET THE DROP ALERT.' };
-for (const [k, v] of Object.entries(OLD)) if (db.settings[k] === v) db.settings[k] = seed.settings[k];
-if (db.settings.marquee?.some(m => /DROP 07|REWORKED VINTAGE|300 UNITS/.test(m))) db.settings.marquee = seed.settings.marquee;
+function migrate() {
+  const seed = SEED();
+  for (const [k, v] of Object.entries(seed.settings)) if (!(k in db.settings)) db.settings[k] = v;
+  db.pages = { ...seed.pages, ...db.pages };
+  db.messages ??= [];
+  db.drops ??= [];
+  // Copy that only made sense for the mockup's "Drop 07": swap it for the new defaults, but only
+  // where it was never edited (still exactly the old text).
+  const OLD = { liveLabel: 'DROP 07 LIVE', kicker: 'DROP 07 // STATIC SEASON // 300 UNITS', mobileKicker: 'DROP 07 // LIVE', ctaLabel: 'SHOP DROP 07 →', secondaryCta: 'VIEW LOOKBOOK', rotationTitle: 'THE ROTATION', signupTitle: 'GET THE DROP ALERT.' };
+  for (const [k, v] of Object.entries(OLD)) if (db.settings[k] === v) db.settings[k] = seed.settings[k];
+  if (db.settings.marquee?.some(m => /DROP 07|REWORKED VINTAGE|300 UNITS/.test(m))) db.settings.marquee = seed.settings.marquee;
+}
 
-export function save() {
+export const db = {};
+const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers'];
+const DOCS = ['settings', 'pages', 'importedImages', 'woo'];
+const rowId = (coll, r) => String(coll === 'subscribers' ? r.email : r.id);
+
+/* ---------- local file ---------- */
+if (!remote) {
+  Object.assign(db, fs.existsSync(DB_FILE) ? JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) : SEED());
+  migrate();
+  if (!fs.existsSync(DB_FILE)) writeFile();
+}
+function writeFile() {
   const tmp = DB_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
   fs.renameSync(tmp, DB_FILE);
 }
 
-if (!fs.existsSync(DB_FILE)) save();
+/* ---------- Supabase ---------- */
+async function sb(url, opts = {}) {
+  // Legacy service_role keys are JWTs and go in Authorization too; new sb_secret_ keys go in apikey only.
+  const auth = KEY.startsWith('eyJ') ? { Authorization: 'Bearer ' + KEY } : {};
+  const res = await fetch(SB + url, { ...opts, headers: { apikey: KEY, ...auth, ...opts.headers }, signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`Supabase ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return res;
+}
+
+let snap = new Map(), loadedAt = 0;
+const current = () => {
+  const m = new Map();
+  for (const c of ROWS) for (const r of db[c] || []) m.set(`${c}/${rowId(c, r)}`, { coll: c, id: rowId(c, r), data: r });
+  for (const d of DOCS) if (db[d] !== undefined) m.set(`doc/${d}`, { coll: 'doc', id: d, data: db[d] });
+  return m;
+};
+
+// Replace db with what's in Supabase. maxAge > 0 skips the reload if the last one is that recent.
+export async function load(maxAge = 0) {
+  if (!remote || (maxAge && Date.now() - loadedAt < maxAge)) return;
+  const rows = [];
+  for (let off = 0; ; off += 1000) {
+    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}`)).json();
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
+  for (const k of Object.keys(db)) delete db[k];
+  if (!rows.some(r => r.coll === 'doc' && r.id === 'settings')) Object.assign(db, SEED()); // empty project: start from the seed
+  else {
+    for (const c of ROWS) db[c] = [];
+    for (const r of rows) r.coll === 'doc' ? (db[r.id] = r.data) : db[r.coll]?.push(r.data);
+    const by = k => (a, b) => String(a[k]).localeCompare(String(b[k]));
+    db.orders.sort(by('createdAt')); db.messages.sort(by('at')); db.subscribers.sort(by('at'));
+  }
+  snap = new Map(rows.map(r => [`${r.coll}/${r.id}`, JSON.stringify(r.data)]));
+  migrate();
+  loadedAt = Date.now();
+}
+
+// Write the rows that changed since the last load/save, delete the ones that are gone.
+async function push() {
+  const now = current(), at = new Date().toISOString();
+  const next = new Map([...now].map(([k, r]) => [k, JSON.stringify(r.data)]));
+  const up = [...now].filter(([k]) => snap.get(k) !== next.get(k)).map(([, r]) => ({ ...r, updated_at: at }));
+  for (let i = 0; i < up.length; i += 200) {
+    await sb('/rest/v1/thryftly', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(up.slice(i, i + 200)) });
+  }
+  const gone = {};
+  for (const k of snap.keys()) if (!next.has(k)) { const [c, ...rest] = k.split('/'); (gone[c] ||= []).push(rest.join('/')); }
+  for (const [c, ids] of Object.entries(gone)) {
+    for (let i = 0; i < ids.length; i += 100) {
+      const list = ids.slice(i, i + 100).map(x => `"${x.replace(/["\\]/g, '')}"`).join(',');
+      await sb(`/rest/v1/thryftly?coll=eq.${c}&id=in.(${encodeURIComponent(list)})`, { method: 'DELETE' });
+    }
+  }
+  snap = next; // only after everything landed, so a failed save is retried in full next time
+}
+
+let chain = Promise.resolve(), last = null;
+export function save() {
+  if (!remote) { writeFile(); return Promise.resolve(); }
+  last = chain = chain.catch(() => {}).then(push);
+  return last;
+}
+// The save started by the current request, if any (the server waits for it before replying).
+export function flush() { const p = last; last = null; return p; }
+
+// One writing request at a time per server: it reloads, changes, saves, then the next one goes.
+let queue = Promise.resolve(), writers = 0;
+export const isBusy = () => writers > 0;
+export function lock() {
+  let release;
+  const mine = new Promise(r => (release = r)), before = queue;
+  queue = queue.then(() => mine);
+  writers++;
+  let done = false;
+  return before.then(() => () => { if (!done) { done = true; writers--; release(); } });
+}
+
+/* ---------- images ---------- */
+export async function putFile(name, buf, type) {
+  if (!remote) return fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  await sb(`/storage/v1/object/uploads/${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': type, 'x-upsert': 'true', 'cache-control': 'max-age=31536000' }, body: buf });
+}
+export const fileUrl = name => `${SB}/storage/v1/object/public/uploads/${encodeURIComponent(name)}`;
+
+// Names already in the bucket (the push script skips those).
+export async function listFiles() {
+  const names = new Set();
+  for (let offset = 0; ; offset += 1000) {
+    const page = await (await sb('/storage/v1/object/list/uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: '', limit: 1000, offset }) })).json();
+    page.forEach(f => names.add(f.name));
+    if (page.length < 1000) return names;
+  }
+}

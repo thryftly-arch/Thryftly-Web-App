@@ -1,0 +1,28 @@
+# Netlify: the pages are static files from dist/, the API is one function (netlify/functions/api.mjs).
+# Data and images live in Supabase (supabase/schema.sql). Set the environment variables listed in
+# README → "Deploy on Netlify" in Site settings → Environment variables before the first deploy.
+[build]
+  command = "npm run build:netlify"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/wp-json/*"
+  to = "/.netlify/functions/api/wp-json/:splat"
+  status = 200
+  force = true
+
+# /uploads/* → Supabase Storage is written to dist/_redirects at build time (tools/netlify-redirects.js),
+# because it needs SUPABASE_URL.

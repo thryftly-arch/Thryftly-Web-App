@@ -70,3 +70,18 @@
 .adm-pick-item.on { border-color: var(--yel); background: rgba(255,216,77,.08); }
 .adm-pick-item .adm-thumb { width: 40px; height: 48px; }
 .adm-pick-item small { color: rgba(255,255,255,.5); }
+
+/* overview + list filters + bulk bar */
+.adm-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.adm-stat { display: flex; flex-direction: column; gap: 6px; padding: 16px; text-align: left; border: 1px solid rgba(255,255,255,.15); background: #111113; transition: border-color .15s; }
+.adm-stat:not(:disabled):hover { border-color: var(--yel); }
+.adm-stat small { font: 700 10px var(--mono); letter-spacing: .12em; color: rgba(255,255,255,.55); }
+.adm-stat b { font: 800 26px var(--mono); color: var(--yel); }
+.adm-stat i { font: 500 11px var(--mono); font-style: normal; color: rgba(255,255,255,.5); }
+.adm-filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.adm-filter input, .adm-filter select { width: auto; padding: 9px 10px; background: #111113; color: #fff; border: 1px solid rgba(255,255,255,.2); font: 500 12px var(--mono); }
+.adm-filter input { flex: 1 1 240px; }
+.adm-filter .cnt { font: 700 11px var(--mono); letter-spacing: .1em; color: rgba(255,255,255,.55); }
+.adm-bulk { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 10px; background: var(--yel); color: #000; font: 700 11px var(--mono); letter-spacing: .08em; }
+.adm-bulk button { padding: 6px 10px; border: 2px solid #000; font: 800 10px var(--mono); letter-spacing: .08em; }
+.adm-bulk button:hover { background: #000; color: var(--yel); }

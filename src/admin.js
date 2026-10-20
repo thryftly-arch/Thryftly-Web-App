@@ -42,12 +42,12 @@ async function boot() {
   const qkMode = me.qikinkBase.includes('sandbox') ? 'SANDBOX' : 'LIVE';
   $('.adm-status').innerHTML = `<span class="${me.razorpay ? 'ok' : 'no'}">RAZORPAY ${me.razorpay ? 'ON' : 'OFF'}</span><span class="${me.qikink ? 'ok' : 'no'}">QIKINK ${me.qikink ? qkMode : 'OFF'}</span>`;
   symbol = (await req('GET', '/settings')).symbol;
-  go('products');
+  go('overview');
 }
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
+  ({ overview: viewOverview, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -94,18 +94,63 @@ function rows(container, items, cols, blank) {
   return draw;
 }
 
+/* ---------- overview ---------- */
+async function viewOverview() {
+  const o = await req('GET', '/overview');
+  const card = (label, value, note = '', tab = '') => `<button class="adm-stat" ${tab ? `data-go="${tab}"` : 'disabled'}><small>${label}</small><b>${value}</b>${note ? `<i>${note}</i>` : ''}</button>`;
+  const m = v => esc(symbol) + Math.round(v).toLocaleString('en-IN');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">OVERVIEW</h1></div>
+    <div class="adm-stats">
+      ${card('SALES TODAY', m(o.today.revenue), `${o.today.orders} paid orders`, 'orders')}
+      ${card('LAST 30 DAYS', m(o.month.revenue), `${o.month.orders} paid orders`, 'orders')}
+      ${card('NEEDS ATTENTION', o.failed, 'paid orders that did not reach Qikink', 'orders')}
+      ${card('UNREAD MESSAGES', o.unread, '', 'messages')}
+      ${card('LIVE PRODUCTS', o.live, `${o.hidden} hidden`, 'products')}
+      ${card('MISSING SKUs', o.noSku, 'live products with a variant that cannot be ordered', 'products')}
+      ${card('DROP ALERT LIST', o.subscribers, 'emails', 'subscribers')}
+      ${card('LIVE DROP', o.drop ? esc(o.drop) : 'NONE', '', 'drops')}
+    </div>
+    <h2 class="adm-h" style="font-size:16px;margin:28px 0 12px">LATEST ORDERS</h2>
+    <table class="adm-table"><thead><tr><th>ORDER</th><th>WHEN</th><th>CUSTOMER</th><th>TOTAL</th><th>STATUS</th></tr></thead><tbody>
+      ${o.latest.map(x => `<tr><td>${esc(x.number)}</td><td>${new Date(x.createdAt).toLocaleString()}</td><td>${esc(x.name)}</td><td>${m(x.amount)}</td><td><span class="adm-pill ${(STATUS[x.status] || [])[1] || 'grey'}">${esc((STATUS[x.status] || [x.status])[0])}</span></td></tr>`).join('') || '<tr><td colspan="5">No orders yet.</td></tr>'}
+    </tbody></table>`;
+  main().querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
+}
+
 /* ---------- products ---------- */
 async function viewProducts() {
   const products = await req('GET', '/products');
   main().innerHTML = `
     <div class="adm-bar"><h1 class="adm-h">PRODUCTS</h1><div style="display:flex;gap:12px"><label class="btn-ghost">IMPORT SHOPIFY CSV<input type="file" accept=".csv,text/csv" class="shopify" hidden></label><label class="btn-ghost">IMPORT QIKINK CSV<input type="file" accept=".csv,text/csv" class="csv" hidden></label><button class="btn-red new">+ NEW PRODUCT</button></div></div>
     <p class="adm-note">Qikink has no catalogue API. Moving from Shopify: export Products → CSV in Shopify and import it here. Colours, sizes, Qikink SKUs, prices and every image come across, and images are copied to this server. (Qikink's own CSV has no colours, SKUs or images, so it only creates hidden drafts.) A variant without a SKU can't be bought. Paid orders go to Qikink automatically.</p>
-    <table class="adm-table"><thead><tr><th></th><th>NAME</th><th>PRICE</th><th class="hide-sm">STOCK</th><th class="hide-sm">QIKINK SKUs</th><th class="hide-sm">SHOWN IN</th><th>STATUS</th><th></th></tr></thead><tbody></tbody></table>`;
-  const tb = $('tbody', main());
-  for (const p of products) {
+    <div class="adm-filter"><input class="q" type="search" placeholder="Search name, slug or SKU"><select class="cat"><option value="">All categories</option>${[...new Set(products.map(p => p.category).filter(Boolean))].sort().map(c => `<option>${esc(c)}</option>`).join('')}</select>
+      <select class="st"><option value="">Any status</option><option value="live">Live</option><option value="hidden">Hidden</option><option value="nosku">Missing SKUs</option><option value="soldout">Sold out</option><option value="ring">In the ring</option></select><span class="cnt"></span></div>
+    <div class="adm-bulk" hidden><b class="n"></b> SELECTED <button data-set='{"active":true}'>MAKE LIVE</button><button data-set='{"active":false}'>HIDE</button><button data-set='{"inRotation":true}'>ADD TO RING</button><button data-set='{"inRotation":false}'>REMOVE FROM RING</button><button data-set='{"featured":true}'>SHOW IN GRID</button><button data-set='{"featured":false}'>HIDE FROM GRID</button><button class="none">CLEAR</button></div>
+    <table class="adm-table"><thead><tr><th><input type="checkbox" class="all" aria-label="Select all shown"></th><th></th><th>NAME</th><th>PRICE</th><th class="hide-sm">STOCK</th><th class="hide-sm">QIKINK SKUs</th><th class="hide-sm">SHOWN IN</th><th>STATUS</th><th></th></tr></thead><tbody></tbody></table>`;
+  const tb = $('tbody', main()), picked = new Set();
+  const shown = () => {
+    const q = $('.q', main()).value.trim().toLowerCase(), cat = $('.cat', main()).value, st = $('.st', main()).value;
+    return products.filter(p => {
+      const stock = p.sizes.reduce((t, s) => t + s.stock, 0);
+      if (q && !(p.name.toLowerCase().includes(q) || p.slug.includes(q) || p.sizes.some(s => s.sku?.toLowerCase().includes(q)))) return false;
+      if (cat && p.category !== cat) return false;
+      return !st || { live: p.active, hidden: !p.active, nosku: p.sizes.some(s => !s.sku), soldout: !stock, ring: p.inRotation }[st];
+    });
+  };
+  const draw = () => {
+    tb.innerHTML = '';
+    const list = shown();
+    $('.cnt', main()).textContent = `${list.length} OF ${products.length}`;
+    $('.all', main()).checked = list.length > 0 && list.every(p => picked.has(p.id));
+    for (const p of list) tb.append(row(p));
+    $('.adm-bulk', main()).hidden = !picked.size;
+    $('.adm-bulk .n', main()).textContent = picked.size;
+  };
+  const row = p => {
     const stock = p.sizes.reduce((t, s) => t + s.stock, 0);
     const skus = p.sizes.filter(s => s.sku).length;
     const tr = h(`<tr>
+      <td><input type="checkbox" class="pick" ${picked.has(p.id) ? 'checked' : ''} aria-label="Select ${esc(p.name)}"></td>
       <td><div class="adm-thumb" style="background-image:${esc(cssUrl(p.images.front))}"></div></td>
       <td><b>${esc(p.name)}</b> ${esc(p.edition)}<br><small>/${esc(p.slug)}</small></td>
       <td>${esc(symbol)}${p.price}</td>
@@ -115,8 +160,23 @@ async function viewProducts() {
       <td>${p.active ? '<span class="adm-pill green">LIVE</span>' : '<span class="adm-pill grey">HIDDEN</span>'}</td>
       <td><button class="adm-link">EDIT</button></td></tr>`);
     $('button', tr).addEventListener('click', () => editProduct(p));
-    tb.append(tr);
-  }
+    $('.pick', tr).addEventListener('change', e => { e.target.checked ? picked.add(p.id) : picked.delete(p.id); draw(); });
+    return tr;
+  };
+  ['.q', '.cat', '.st'].forEach(sel => $(sel, main()).addEventListener('input', draw));
+  $('.all', main()).addEventListener('change', e => { for (const p of shown()) e.target.checked ? picked.add(p.id) : picked.delete(p.id); draw(); });
+  $('.adm-bulk', main()).addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.classList.contains('none')) { picked.clear(); return draw(); }
+    const set = JSON.parse(b.dataset.set);
+    try {
+      const r = await req('PATCH', '/products', { ids: [...picked], set });
+      for (const p of products) if (picked.has(p.id)) Object.assign(p, set);
+      toast(`UPDATED ${r.changed} PRODUCTS`); draw();
+    } catch (err) { toast(err.message, true); }
+  });
+  draw();
   $('.shopify', main()).addEventListener('change', async e => {
     const f = e.target.files[0];
     if (!f) return;
@@ -373,8 +433,20 @@ async function viewOrders() {
   const orders = await req('GET', '/orders');
   main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">ORDERS</h1><div style="display:flex;gap:12px"><button class="btn-ghost sync">SYNC QIKINK STATUS</button><button class="btn-ghost qk">RAW QIKINK ORDERS</button></div></div>
     <p class="adm-note">Paid orders go to Qikink automatically. If one fails (missing SKU, Qikink down), fix the cause and press RETRY. “Awaiting payment” orders are abandoned checkouts.</p>
+    <div class="adm-filter"><input class="q" type="search" placeholder="Search order number, name, email or phone"><select class="st"><option value="">Any status</option>${Object.entries(STATUS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select><span class="cnt"></span></div>
     <div class="list">${orders.length ? '' : '<p class="adm-note">No orders yet.</p>'}</div><pre class="adm-note qk-out"></pre>`;
   const list = $('.list', main());
+  const filter = () => {
+    const q = $('.q', main()).value.trim().toLowerCase(), st = $('.st', main()).value;
+    let n = 0;
+    for (const el of list.querySelectorAll('.adm-order')) {
+      const o = el._order;
+      const hit = (!st || o.status === st) && (!q || [o.number, o.customer.name, o.customer.email, o.customer.phone].some(v => String(v).toLowerCase().includes(q)));
+      el.hidden = !hit; n += hit;
+    }
+    $('.cnt', main()).textContent = `${n} OF ${orders.length}`;
+  };
+  ['.q', '.st'].forEach(sel => $(sel, main()).addEventListener('input', filter));
   for (const o of orders) {
     const [label, color] = STATUS[o.status] || [o.status, 'grey'];
     const c = o.customer;
@@ -391,8 +463,10 @@ async function viewOrders() {
     $('.retry', el)?.addEventListener('click', async () => {
       try { const r = await req('POST', `/orders/${o.id}/fulfill`); toast(r.status === 'sent_to_qikink' ? 'SENT TO QIKINK' : r.fulfillmentError, r.status !== 'sent_to_qikink'); viewOrders(); } catch (e) { toast(e.message, true); }
     });
+    el._order = o;
     list.append(el);
   }
+  filter();
   $('.sync', main()).addEventListener('click', async () => {
     try { const r = await req('POST', '/orders/sync'); toast(`SYNCED ${r.synced} ORDERS`); viewOrders(); } catch (e) { toast(e.message, true); }
   });
