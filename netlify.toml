@@ -7,6 +7,9 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Settings that aren't secrets and whose values also appear in the code/docs (URLs, ports, model
+  # names). Without this, Netlify's secret scan fails the build when any of them is set in the UI.
+  SECRETS_SCAN_OMIT_KEYS = "PORT,DATA_DIR,NODE_ENV,OLLAMA_URL,OLLAMA_MODEL,QIKINK_BASE_URL,SUPABASE_URL,SITE_URL"
 
 [functions]
   directory = "netlify/functions"

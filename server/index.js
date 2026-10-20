@@ -1,3 +1,4 @@
+import './env.js'; // first: loads .env before the store reads it
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -7,11 +8,10 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 
-try { process.loadEnvFile(); } catch { /* no .env: rely on real env vars */ }
+import * as S from './store.js';
+import * as I from './integrations.js';
 
-const S = await import('./store.js');
 const { db, save, id, UPLOAD_DIR, DATA_DIR } = S;
-const I = await import('./integrations.js');
 
 // LAMBDA: running as the Netlify function (netlify/functions/api.mjs), not as a long-lived server.
 const LAMBDA = !!process.env.LAMBDA_TASK_ROOT;
