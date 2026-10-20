@@ -19,5 +19,7 @@ const run = serverless(app, {
 });
 export const handler = (event, context) => {
   event.path = (event.path || '/').replace(/^\/\.netlify\/functions\/api/, '') || '/';
+  // Rewrites hand over the visitor's original path: /sitemap.xml, /robots.txt, /feeds/google.xml live under /api.
+  if (/^\/(sitemap\.xml|robots\.txt|feeds\/google\.xml)$/.test(event.path)) event.path = '/api' + event.path;
   return run(event, context);
 };
