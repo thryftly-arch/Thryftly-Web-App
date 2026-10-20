@@ -179,7 +179,7 @@ export function parseQikinkCsv(text) {
 /* ---------------- Shopify product export (migration off Shopify) ---------------- */
 // Shopify's Products → Export CSV: one row per variant, extra rows per image, grouped by Handle.
 // Variant SKUs are the ones Qikink created when it pushed the product, so orders map 1:1.
-const htmlToText = h => String(h || '')
+export const htmlToText = h => String(h || '')
   .replace(/<(br|\/p|\/li|\/h\d)\s*\/?>/gi, '\n').replace(/<li[^>]*>/gi, '• ').replace(/<[^>]+>/g, '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
   .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
@@ -233,4 +233,32 @@ export function parseShopifyCsv(text) {
       variants, colorImages, gallery,
     };
   });
+}
+
+/* ---------------- Qikink's WooCommerce plugin handshake ---------------- */
+// Does what the GPL plugin qikink-pod-and-drop-shipping (huepress.php) does from WordPress, so
+// Qikink treats this site as a WooCommerce store. Its payloads are JSON, AES-128-CTR encrypted
+// with a key and IV hard-coded in the plugin. See docs/qikink-woocommerce.md.
+const QK_PLUGIN = 'https://fulfilment.qikink.com/index.php/autoc/';
+
+export function qikinkPluginEncrypt(params) {
+  // PHP pads the 14-byte key with NULs, and json_encode escapes "/".
+  const c = crypto.createCipheriv('aes-128-ctr', Buffer.from('qikinkhuepress\0\0'), Buffer.from('8929770667187677'));
+  return Buffer.concat([c.update(JSON.stringify(params).replace(/\//g, '\/')), c.final()]).toString('base64');
+}
+
+// check_install {Store_URL} · wp_plugin {EmailId, store_url} (emails an OTP) · wp_plugin_otp {otp, client_id}
+export async function qikinkPlugin(path, params) {
+  const res = await fetch(QK_PLUGIN + path, { method: 'POST', body: new URLSearchParams({ encrypted_data: qikinkPluginEncrypt(params) }), signal: AbortSignal.timeout(15000) });
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { throw new Error('Qikink said: ' + text.slice(0, 200)); }
+}
+
+// What WooCommerce core POSTs to the plugin's callback_url once the owner approves /wc-auth/v1/authorize.
+export async function qikinkPluginSendKeys(clientId, consumerKey, consumerSecret) {
+  const res = await fetch(QK_PLUGIN.replace('autoc/', 'Autoc/get_woocommerce_keys'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(60000),
+    body: JSON.stringify({ key_id: 1, user_id: clientId, consumer_key: consumerKey, consumer_secret: consumerSecret, key_permissions: 'read_write' }),
+  });
+  return { status: res.status, body: (await res.text()).slice(0, 500) };
 }

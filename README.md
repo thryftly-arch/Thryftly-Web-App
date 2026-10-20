@@ -65,6 +65,8 @@ When an order is paid, it goes to Qikink as a prepaid order. The order number is
 
 `QIKINK_BASE_URL` is `https://sandbox.qikink.com` for testing and `https://api.qikink.com` for live. The `client_secret` is different for sandbox and live, while the ClientId is the same. Live API access has to be requested in the Qikink dashboard under Integration → Custom API. The rate limit is 60 requests per minute.
 
+**Experimental: Qikink "Push to store".** The site can pose as a WooCommerce store so Qikink pushes new products (colours, sizes, SKUs, mockups) straight in, hidden until you tick Live. It hasn't been tested against a live Qikink account yet. See [docs/qikink-woocommerce.md](docs/qikink-woocommerce.md).
+
 ### AI try-on: Ollama, no API keys
 The garment cut-out is placed over the customer's photo in the browser. Nothing is uploaded until they press **Ask the AI stylist**. That sends the combined image to a local Ollama vision model, which replies with fit and styling notes.
 

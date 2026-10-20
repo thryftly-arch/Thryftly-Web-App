@@ -1,6 +1,10 @@
 // Run: npm run check — verifies the payment-signature logic money depends on.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 process.env.RAZORPAY_KEY_SECRET = 'test_secret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'hook_secret';
@@ -51,3 +55,55 @@ const [combo] = I.parseShopifyCsv(`Handle,Title,Option1 Name,Option1 Value,Optio
 duo,Duo,Tee A (color),Black,Tee A (size),S,Tee B (size),M,qikink-sku-1,1599,active`);
 assert.deepEqual(combo.variants.map(v => [v.color, v.label]), [['BLACK', 'S / M']]);
 console.log('shopify csv checks ok');
+
+// Qikink → WooCommerce receiver: replay a typical push against a throwaway server.
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'thryftly-check-'));
+const port = 3900 + Math.floor(Math.random() * 100);
+const srv = spawn(process.execPath, [path.resolve('server/index.js')], {
+  cwd: tmp, stdio: ['ignore', 'pipe', 'inherit'],
+  env: { ...process.env, NODE_ENV: 'development', PORT: port, DATA_DIR: tmp, SITE_URL: 'https://shop.test', WOO_CONSUMER_KEY: 'ck_test', WOO_CONSUMER_SECRET: 'cs_test' },
+});
+await new Promise(r => srv.stdout.once('data', r));
+const basic = { Authorization: 'Basic ' + Buffer.from('ck_test:cs_test').toString('base64') };
+const call = async (method, url, body, headers = basic) => {
+  const r = await fetch(`http://127.0.0.1:${port}${url.startsWith('/?') ? '' : '/wp-json/wc/v3'}${url}`, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body && JSON.stringify(body) });
+  return [r.status, await r.json()];
+};
+try {
+  assert.equal((await call('GET', '/products', undefined, {}))[0], 401, 'no keys rejected');
+  assert.equal((await call('GET', '/products?consumer_key=ck_test&consumer_secret=nope', undefined, {}))[0], 401, 'wrong secret rejected');
+  const [, cat] = await call('POST', '/products/categories', { name: 'Hoodies' });
+  const [, color] = await call('POST', '/products/attributes', { name: 'Color', type: 'select' });
+  const [st, prod] = await call('POST', '/products', {
+    name: 'Volt Hoodie', type: 'variable', status: 'publish', description: '<p>Heavy &amp; warm</p>', categories: [{ id: cat.id }],
+    images: [{ src: 'https://127.0.0.1:1/front.jpg' }, { src: 'https://127.0.0.1:1/back.jpg' }],
+    attributes: [{ id: color.id, options: ['Black', 'Bone'], variation: true, visible: true }, { name: 'Size', options: ['S', 'XL'], variation: true, visible: true }],
+  });
+  assert.equal(st, 201);
+  const v = (c, s, sku, price) => ({ sku, regular_price: price, attributes: [{ id: color.id, option: c }, { name: 'Size', option: s }], image: { src: `https://127.0.0.1:1/${c}.jpg` } });
+  const [, batch] = await call('POST', `/products/${prod.id}/variations/batch`, { create: [v('Black', 'S', 'qk-1', '1999'), v('Black', 'XL', 'qk-2', '2099'), v('Bone', 'S', 'qk-3', '1999')] });
+  assert.equal(batch.create.length, 3);
+  // A re-push updates in place, here with query-string auth and a single-variation call.
+  const qs = '?consumer_key=ck_test&consumer_secret=cs_test';
+  assert.equal((await call('PUT', `/products/${prod.id}/variations/${batch.create[1].id}${qs}`, { regular_price: '2199' }, {}))[0], 200);
+  assert.equal((await call('POST', `/products/${prod.id}/variations${qs}`, v('Bone', 'XL', 'qk-4', '2199'), {}))[0], 201);
+  const [, got] = await call('GET', `/?rest_route=/wc/v3/products/${prod.id}&${qs.slice(1)}`, undefined, {});
+  assert.equal(got.id, prod.id, 'rest_route form works');
+  assert.equal(got.variations.length, 4);
+  assert.deepEqual((await call('GET', '/orders'))[1], [], 'orders never offered to Qikink');
+  assert.equal((await call('DELETE', `/products/${prod.id}`))[0], 200);
+
+  const db = JSON.parse(fs.readFileSync(path.join(tmp, 'db.json'), 'utf8'));
+  const p = db.products.find(p => p.woo?.id === prod.id);
+  assert.equal(p.active, false, 'pushed products land hidden');
+  assert.equal(p.name, 'VOLT HOODIE');
+  assert.equal(p.category, 'HOODIES');
+  assert.equal(p.description, 'Heavy & warm');
+  assert.equal(p.price, 1999);
+  assert.deepEqual(p.sizes.map(s => [s.color, s.label, s.sku, s.price]), [['BLACK', 'S', 'qk-1', 0], ['BLACK', 'XL', 'qk-2', 2199], ['BONE', 'S', 'qk-3', 0], ['BONE', 'XL', 'qk-4', 2199]]);
+  assert.deepEqual(Object.keys(p.colorImages), ['BLACK', 'BONE']);
+  assert.equal(p.images.back, 'https://127.0.0.1:1/back.jpg', 'undownloadable image keeps its URL');
+  const log = fs.readFileSync(path.join(tmp, 'woo-log.jsonl'), 'utf8');
+  assert.ok(log.split('\n').length > 8 && !log.includes('cs_test'), 'requests logged without the secret');
+} finally { srv.kill(); }
+console.log('woocommerce receiver checks ok');

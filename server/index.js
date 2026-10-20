@@ -9,11 +9,12 @@ import multer from 'multer';
 
 try { process.loadEnvFile(); } catch { /* no .env: rely on real env vars */ }
 
-const { db, save, id, UPLOAD_DIR } = await import('./store.js');
+const { db, save, id, UPLOAD_DIR, DATA_DIR } = await import('./store.js');
 const I = await import('./integrations.js');
 
 const PROD = process.env.NODE_ENV === 'production';
 const PORT = +process.env.PORT || 3000;
+const siteUrl = () => (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 const SESSION_SECRET = process.env.SESSION_SECRET || (PROD ? '' : 'dev-only-secret');
 if (PROD && (!SESSION_SECRET || !process.env.ADMIN_PASSWORD)) {
   console.error('Refusing to start: set SESSION_SECRET and ADMIN_PASSWORD in production.');
@@ -312,6 +313,25 @@ async function downloadImage(url) {
   return '/uploads/' + name;
 }
 
+// Copy a remote image once; later imports of the same URL reuse the file. Failures keep the remote URL.
+async function localImage(url) {
+  const have = db.importedImages?.[url];
+  if (have && fs.existsSync(path.join(UPLOAD_DIR, path.basename(have)))) return have;
+  const got = await downloadImage(url).catch(() => '');
+  if (got) (db.importedImages ||= {})[url] = got;
+  return got || url;
+}
+
+// Shared defaults for products created by an import (Shopify CSV, Qikink push).
+function newImported(slugBase, title, fields) {
+  let slug = slugBase.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'product';
+  while (db.products.some(p => p.slug === slug)) slug += '-2';
+  return {
+    id: id(), slug, edition: '', badge: '', badgeStyle: 'yellow', tag: '', color: '', fitLabel: '', specs: [], tryonImage: '',
+    ringLabel: title.toLowerCase(), featured: true, inRotation: false, sort: 100 + db.products.length, ...fields,
+  };
+}
+
 admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap(async (req, res) => {
   let rows;
   try { rows = I.parseShopifyCsv(String(req.body || '')); } catch (e) { return fail(res, 400, e.message); }
@@ -321,21 +341,14 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
   const local = {};
   let failed = 0;
   for (let i = 0; i < urls.length; i += 6) {
-    await Promise.all(urls.slice(i, i + 6).map(async u => {
-      // Re-imports reuse images already copied from the same Shopify URL.
-      const have = db.importedImages?.[u];
-      if (have && fs.existsSync(path.join(UPLOAD_DIR, path.basename(have)))) return void (local[u] = have);
-      try { local[u] = (await downloadImage(u)) || u; } catch { local[u] = u; }
-      if (local[u] !== u) (db.importedImages ||= {})[u] = local[u];
-      if (local[u] === u) failed++;
-    }));
+    await Promise.all(urls.slice(i, i + 6).map(async u => { local[u] = await localImage(u); if (local[u] === u) failed++; }));
   }
   const L = u => (u ? local[u] || u : '');
 
   let added = 0, updated = 0;
   for (const r of rows) {
     const name = r.title.toUpperCase().slice(0, 80);
-    let slug = r.handle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = r.handle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     // Match on the Shopify handle only: several Shopify products share a title.
     const prev = db.products.find(p => p.shopify?.handle === r.handle) || db.products.find(p => !p.shopify && p.slug === slug);
     const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
@@ -349,15 +362,11 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
       Object.assign(prev, fields);
       updated++;
     } else {
-      while (db.products.some(p => p.slug === slug)) slug += '-2';
-      db.products.push({
-        id: id(), slug, edition: '', badge: '', badgeStyle: 'yellow', tag: '', color: '', fitLabel: '', specs: [], tryonImage: '',
-        ringLabel: r.title.toLowerCase(), featured: true, sort: 100 + db.products.length,
+      db.products.push(newImported(r.handle, r.title, {
         // Go live straight away only if it was live on Shopify and every variant can be fulfilled.
         active: r.status === 'active' && variants.every(v => v.sku),
-        inRotation: false,
         ...fields,
-      });
+      }));
       added++;
     }
   }
@@ -395,6 +404,225 @@ admin.post('/import/qikink', express.text({ type: '*/*', limit: '2mb' }), (req, 
   save();
   res.json({ added, skipped });
 });
+
+// Qikink connects to WooCommerce through its WordPress plugin, then pushes products over the
+// WooCommerce REST v3 API. The plugin's half is replayed by these admin endpoints (the owner's
+// Qikink account email → OTP → our API keys to Qikink). See docs/qikink-woocommerce.md.
+const wooKeys = () => process.env.WOO_CONSUMER_KEY && process.env.WOO_CONSUMER_SECRET;
+admin.get('/qikink/woo/status', wrap(async (req, res) => res.json(await I.qikinkPlugin('check_install', { Store_URL: siteUrl() }))));
+admin.post('/qikink/woo/connect', wrap(async (req, res) => res.json(await I.qikinkPlugin('wp_plugin', { EmailId: str(req.body.email, 200), store_url: siteUrl() }))));
+admin.post('/qikink/woo/otp', wrap(async (req, res) => {
+  if (!wooKeys()) return fail(res, 503, 'Set WOO_CONSUMER_KEY and WOO_CONSUMER_SECRET first');
+  const client_id = str(req.body.client_id, 40);
+  const r = await I.qikinkPlugin('wp_plugin_otp', { otp: str(req.body.otp, 10), client_id });
+  if (!r.status) return fail(res, 400, 'Qikink rejected the OTP');
+  res.json({ keys: await I.qikinkPluginSendKeys(client_id, process.env.WOO_CONSUMER_KEY, process.env.WOO_CONSUMER_SECRET) });
+}));
+
+/* ---------------- WooCommerce-compatible receiver (Qikink "Push to store") ---------------- */
+// Only the slice of WC REST v3 a product push needs. Pushed products land hidden until ticked Live.
+// Qikink's exact requests are undocumented, so every call is logged to data/woo-log.jsonl.
+// ponytail: log grows forever; rotate or drop it once a real push has been checked.
+const W = () => (db.woo ||= { seq: 1000, objects: {} });
+const wooId = () => ++W().seq;
+const wooStore = col => (W().objects[col] ||= []);
+const wooErr = (res, status, code, message) => void res.status(status).json({ code, message, data: { status } });
+const notFound = () => Object.assign(new Error('Invalid ID.'), { status: 404 });
+const hashEq = (a, b) => { const h = s => crypto.createHash('sha256').update(String(s)).digest(); return crypto.timingSafeEqual(h(a), h(b)); };
+function wooAuthed(req) {
+  if (!wooKeys()) return false;
+  // HTTPS clients send Basic ck:cs, or ?consumer_key=&consumer_secret=. OAuth1 (plain-HTTP only) isn't supported.
+  const basic = /^Basic (.+)$/i.exec(req.get('authorization') || '');
+  const [, k = '', s = ''] = basic ? /^([^:]*):(.*)$/.exec(Buffer.from(basic[1], 'base64').toString()) || [] : [, req.query.consumer_key, req.query.consumer_secret];
+  return hashEq(k, process.env.WOO_CONSUMER_KEY) && hashEq(s, process.env.WOO_CONSUMER_SECRET);
+}
+function wooList(req, res, items) {
+  const per = Math.min(100, Math.max(1, Math.floor(+req.query.per_page || 10))), page = Math.max(1, Math.floor(+req.query.page || 1));
+  res.set({ 'X-WP-Total': items.length, 'X-WP-TotalPages': Math.ceil(items.length / per) }).json(items.slice((page - 1) * per, page * per));
+}
+
+// Sites without pretty permalinks are addressed as /?rest_route=/wc/v3/...
+app.use((req, res, next) => {
+  const u = new URL(req.url, 'http://x'), r = u.searchParams.get('rest_route');
+  if (r) { u.searchParams.delete('rest_route'); req.url = '/wp-json' + r + u.search; }
+  next();
+});
+app.use('/wp-json', express.urlencoded({ extended: true, limit: '12mb' }), (req, res, next) => {
+  const entry = { at: new Date().toISOString(), method: req.method, url: req.originalUrl.replace(/(consumer_secret=)[^&]*/, '$1***'), auth: (req.get('authorization') || '').split(' ')[0], ua: req.get('user-agent'), body: req.body };
+  fs.appendFile(path.join(DATA_DIR, 'woo-log.jsonl'), JSON.stringify(entry) + '\n', () => {});
+  next();
+});
+app.get('/wp-json', (req, res) => res.json({ name: db.settings.footerWord || 'THRYFTLY', url: siteUrl(), home: siteUrl(), namespaces: ['wp/v2', 'wc/v3'] }));
+const woo = express.Router();
+app.use('/wp-json/wc/v3', (req, res, next) => (wooAuthed(req) ? next() : wooErr(res, 401, 'woocommerce_rest_cannot_view', 'Sorry, you cannot list resources.')), woo);
+
+// A variation names its options as {name, option}, or {id, option} for a global attribute.
+const attrName = a => a.name || wooStore('products/attributes').find(x => x.id === +a.id)?.name || '';
+const sameRow = (s, r) => (r.sku && s.sku === r.sku) || (s.color === r.color && s.label === r.label);
+
+function wooOut(p) {
+  const abs = u => (u.startsWith('/') ? siteUrl() + u : u);
+  return {
+    id: p.woo.id, name: p.name, slug: p.slug, permalink: `${siteUrl()}/product.html?p=${p.slug}`, type: p.woo.type,
+    status: p.active ? 'publish' : 'draft', sku: p.woo.sku || '', price: String(p.price), regular_price: String(p.price),
+    description: p.description, categories: p.woo.categories || [], attributes: p.woo.attributes,
+    images: p.woo.images.map((src, i) => ({ id: i + 1, src: abs(src), position: i })),
+    variations: Object.keys(p.woo.vars).map(Number),
+  };
+}
+function wooVarOut(p, key) {
+  const r = p.woo.vars[key], s = p.sizes.find(s => sameRow(s, r));
+  const img = p.colorImages[r.color];
+  return {
+    id: +key, parent_id: p.woo.id, sku: r.sku || '', price: String(r.price || p.price), regular_price: String(r.price || p.price),
+    manage_stock: true, stock_quantity: s?.stock ?? 0, stock_status: s?.stock > 0 ? 'instock' : 'outofstock', attributes: r.attributes,
+    image: img ? { src: img.startsWith('/') ? siteUrl() + img : img } : null,
+  };
+}
+
+// Bigger sizes can cost more: the cheapest variation is the product price, the rest carry their own.
+function wooPrices(p) {
+  const vars = Object.values(p.woo.vars), raw = vars.map(r => r.price).filter(Boolean);
+  if (!p.woo.price && raw.length) p.price = Math.min(...raw);
+  for (const r of vars) { const s = p.sizes.find(s => sameRow(s, r)); if (s && r.price) s.price = r.price === p.price ? 0 : r.price; }
+}
+
+async function wooUpsertProduct(b, p) {
+  if (!p) {
+    const name = str(b.name, 80).toUpperCase();
+    if (!name) throw Object.assign(new Error('Missing parameter(s): name'), { status: 400 });
+    p = newImported(str(b.slug, 80) || name, name, {
+      name, price: 0, category: 'APPAREL', description: '', sizes: [], colorImages: {}, images: { front: '', back: '', detail: '', onBody: '' },
+      active: false, woo: { id: wooId(), type: 'simple', attributes: [], images: [], vars: {} },
+    });
+    db.products.push(p);
+  }
+  if (b.name) p.name = str(b.name, 80).toUpperCase();
+  if (b.description || b.short_description) p.description = I.htmlToText(b.description || b.short_description).slice(0, 2000);
+  if (num(b.regular_price || b.price)) p.price = p.woo.price = num(b.regular_price || b.price);
+  if (b.type) p.woo.type = str(b.type, 20);
+  if ('sku' in b) p.woo.sku = str(b.sku, 50);
+  if (Array.isArray(b.categories) && b.categories.length) {
+    p.woo.categories = b.categories;
+    const c = b.categories[0], n = c.name || wooStore('products/categories').find(x => x.id === +c.id)?.name;
+    if (n) p.category = str(n, 40).toUpperCase();
+  }
+  if (Array.isArray(b.attributes)) p.woo.attributes = b.attributes.map(a => ({ ...a, name: attrName(a) }));
+  if (Array.isArray(b.images)) {
+    p.woo.images = (await Promise.all(b.images.slice(0, 20).map(i => (i?.src ? localImage(str(i.src, 1000)) : '')))).filter(Boolean);
+    const [front = '', back = '', detail = '', onBody = ''] = p.woo.images;
+    p.images = { front, back, detail, onBody };
+  }
+  // A simple product is one size row carrying the product SKU.
+  if (p.woo.type !== 'variable' && p.woo.sku) p.sizes = [{ label: 'OS', color: '', stock: p.sizes[0]?.stock ?? 999, sku: p.woo.sku, price: 0 }];
+  return p;
+}
+
+async function wooUpsertVariation(p, v, key) {
+  const prev = key ? p.woo.vars[key] : null;
+  if (key && !prev) throw notFound();
+  key ||= wooId();
+  const r = { ...prev, attributes: Array.isArray(v.attributes) ? v.attributes : prev?.attributes || [] };
+  r.color = ''; r.label = '';
+  for (const a of r.attributes) {
+    const o = str(a.option, 30).toUpperCase();
+    if (/colou?r/i.test(attrName(a))) r.color = o; else if (!r.label) r.label = o.slice(0, 12);
+  }
+  r.label ||= 'OS';
+  if ('sku' in v) r.sku = str(v.sku, 50);
+  if (num(v.regular_price || v.price)) r.price = num(v.regular_price || v.price);
+  let s = p.sizes.find(s => sameRow(s, prev || r));
+  if (!s) p.sizes.push(s = { label: '', color: '', stock: 999, sku: '', price: 0 }); // print on demand: never runs out
+  Object.assign(s, { label: r.label, color: r.color, sku: r.sku || s.sku });
+  if (v.manage_stock && v.stock_quantity != null) s.stock = Math.floor(num(v.stock_quantity, 0, 99999));
+  const img = v.image?.src || p.woo.images[v.image?.id - 1];
+  if (img && r.color) p.colorImages[r.color] = await localImage(str(img, 1000));
+  p.woo.vars[key] = r;
+  wooPrices(p);
+  return key;
+}
+
+function wooDeleteVariation(p, key) {
+  const r = p.woo.vars[key];
+  if (!r) throw notFound();
+  const out = wooVarOut(p, key);
+  p.sizes = p.sizes.filter(s => !sameRow(s, r));
+  delete p.woo.vars[key];
+  return out;
+}
+
+// Handlers return the response body (or send it themselves); errors come back in WooCommerce's shape.
+const wooWrap = fn => async (req, res, next) => {
+  try { const out = await fn(req, res, next); if (out !== undefined) { save(); res.json(out); } }
+  catch (e) { if (!e.status) console.error(e); wooErr(res, e.status || 500, e.status === 404 ? 'woocommerce_rest_invalid_id' : 'woocommerce_rest_error', e.status ? e.message : 'Something went wrong'); }
+};
+const wooFind = id => { const p = db.products.find(p => p.woo?.id === +id); if (!p) throw notFound(); return p; };
+const isId = v => /^\d+$/.test(v);
+
+woo.get('/system_status', (req, res) => res.json({ environment: { home_url: siteUrl(), site_url: siteUrl(), version: '9.4.0', wp_version: '6.7' }, settings: { currency: db.settings.currency } }));
+// Paid orders already go to Qikink through its order API; listing them here too would print each one twice.
+woo.get('/orders', (req, res) => wooList(req, res, []));
+
+woo.get('/products', (req, res) => {
+  const sku = str(req.query.sku, 50), q = str(req.query.search, 80).toUpperCase();
+  const ps = db.products.filter(p => p.woo && (!sku || p.woo.sku === sku || Object.values(p.woo.vars).some(r => r.sku === sku)) && (!q || p.name.includes(q)));
+  wooList(req, res, ps.map(wooOut));
+});
+woo.post('/products', wooWrap(async (req, res) => { res.status(201); return wooOut(await wooUpsertProduct(req.body)); }));
+woo.post('/products/batch', wooWrap(async req => {
+  const { create = [], update = [], delete: del = [] } = req.body;
+  const out = { create: [], update: [], delete: [] };
+  for (const b of create) out.create.push(wooOut(await wooUpsertProduct(b)));
+  for (const b of update) out.update.push(wooOut(await wooUpsertProduct(b, wooFind(b.id))));
+  for (const i of del) { const p = wooFind(i); p.active = false; out.delete.push(wooOut(p)); }
+  return out;
+}));
+// Deleting from Qikink only hides the product here, so nothing is lost by mistake.
+woo.route('/products/:id')
+  .all((req, res, next) => (isId(req.params.id) ? next() : next('route')))
+  .get(wooWrap(req => wooOut(wooFind(req.params.id))))
+  .post(wooWrap(async req => wooOut(await wooUpsertProduct(req.body, wooFind(req.params.id)))))
+  .put(wooWrap(async req => wooOut(await wooUpsertProduct(req.body, wooFind(req.params.id)))))
+  .patch(wooWrap(async req => wooOut(await wooUpsertProduct(req.body, wooFind(req.params.id)))))
+  .delete(wooWrap(req => { const p = wooFind(req.params.id); p.active = false; return wooOut(p); }));
+
+woo.get('/products/:pid/variations', wooWrap((req, res) => { const p = wooFind(req.params.pid); wooList(req, res, Object.keys(p.woo.vars).map(k => wooVarOut(p, k))); }));
+woo.post('/products/:pid/variations', wooWrap(async (req, res) => { const p = wooFind(req.params.pid); res.status(201); return wooVarOut(p, await wooUpsertVariation(p, req.body)); }));
+woo.post('/products/:pid/variations/batch', wooWrap(async req => {
+  const p = wooFind(req.params.pid), { create = [], update = [], delete: del = [] } = req.body;
+  const out = { create: [], update: [], delete: [] };
+  for (const v of create) out.create.push(wooVarOut(p, await wooUpsertVariation(p, v)));
+  for (const v of update) out.update.push(wooVarOut(p, await wooUpsertVariation(p, v, String(v.id))));
+  for (const i of del) out.delete.push(wooDeleteVariation(p, String(i)));
+  return out;
+}));
+woo.route('/products/:pid/variations/:vid')
+  .get(wooWrap(req => { const p = wooFind(req.params.pid); if (!p.woo.vars[req.params.vid]) throw notFound(); return wooVarOut(p, req.params.vid); }))
+  .all(wooWrap(async req => {
+    const p = wooFind(req.params.pid);
+    if (req.method === 'DELETE') return wooDeleteVariation(p, req.params.vid);
+    return wooVarOut(p, await wooUpsertVariation(p, req.body, req.params.vid));
+  }));
+
+// Anything else (attributes, terms, categories, tags, webhooks...) is kept and echoed back with an id,
+// so a push that sets those up first doesn't fail. Categories by id resolve to names on products.
+woo.all('/*path', wooWrap((req, res) => {
+  const segs = req.params.path, oid = isId(segs.at(-1)) ? +segs.at(-1) : 0;
+  const col = (oid ? segs.slice(0, -1) : segs).join('/'), items = wooStore(col.replace(/\/batch$/, ''));
+  const make = b => { res.status(201); const o = { ...b, id: wooId(), ...(b.name && !b.slug && { slug: str(b.name).toLowerCase().replace(/[^a-z0-9]+/g, '-') }) }; items.push(o); return o; };
+  const find = i => { const o = items.find(x => x.id === +i); if (!o) throw notFound(); return o; };
+  if (col.endsWith('/batch')) {
+    const { create = [], update = [], delete: del = [] } = req.body;
+    const out = { create: create.map(make), update: update.map(b => Object.assign(find(b.id), b)), delete: del.map(i => { const o = find(i); items.splice(items.indexOf(o), 1); return o; }) };
+    res.status(200);
+    return out;
+  }
+  if (req.method === 'GET') return oid ? find(oid) : wooList(req, res, items);
+  if (!oid) return req.method === 'POST' ? make(req.body) : wooErr(res, 404, 'rest_no_route', 'No route was found matching the URL and request method.');
+  const o = find(oid);
+  if (req.method === 'DELETE') { items.splice(items.indexOf(o), 1); return o; }
+  return Object.assign(o, req.body, { id: oid });
+}));
 
 /* ---------------- static ---------------- */
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
