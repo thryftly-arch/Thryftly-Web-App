@@ -119,7 +119,9 @@ if (isProduct) {
 
   // Variants are colour × size. Colour buttons only appear when a product has colours.
   const colors = [...new Set(p.sizes.map(v => v.color).filter(Boolean))];
-  let color = colors.find(c => p.sizes.some(v => v.color === c && v.available)) ?? colors[0] ?? '';
+  // ?c=COLOUR (from a product card the shopper swiped to that colour) opens on that colour.
+  const askedColor = (new URLSearchParams(location.search).get('c') || '').toUpperCase();
+  let color = colors.includes(askedColor) ? askedColor : colors.find(c => p.sizes.some(v => v.color === c && v.available)) ?? colors[0] ?? '';
   let size;
   const add = $('.add-cart');
   function face(el, u, label) {
@@ -303,9 +305,48 @@ if (ringEl) {
   info();
 }
 
-/* ---------- Product: 3D garment viewer ---------- */
+/* ---------- Product viewer ---------- */
+// The 3D garment viewer (garmentModel.js / garment3d.js) is switched off: prints distort when
+// wrapped onto the models. Set USE_3D = true to bring it back; nothing else needs changing.
+const USE_3D = false;
 const viewer = $('.viewer');
-if (viewer) {
+
+/* 2D: framed photo card with tilt, swipe, zoom and a card-flip on colour change. */
+if (viewer && !USE_3D) {
+  viewer.classList.add('is-2d');
+  $('.viewer-tl').innerHTML = '<span class="v2-idx"></span><br><span class="red">● <span class="v2-label"></span></span>';
+  $('.viewer-tr').textContent = 'DRAG · CLICK TO ZOOM';
+  const { mountViewer } = await import('./viewer2d.js');
+  const thumbs = $('.thumbs');
+  const v2 = mountViewer($('.stage2d'), {
+    onChange: (i, v) => {
+      $('.v2-idx').textContent = `VIEW ${String(i + 1).padStart(2, '0')} / ${String(views.length).padStart(2, '0')}`;
+      $('.v2-label').textContent = v?.label || '';
+      $$('.thumb', thumbs).forEach((t, k) => t.classList.toggle('on', k === i));
+    },
+  });
+  let views = [];
+  const p = product;
+  const viewsFor = ({ front, back }) => [
+    ['FRONT', front], ['BACK', back], ['DETAIL', p.images.detail], ['ON BODY', p.images.onBody],
+  ].filter(([, src]) => src).filter(([, src], i, all) => all.findIndex(([, s2]) => s2 === src) === i).map(([label, src]) => ({ label, src }));
+  const show = async (shots, first) => {
+    views = viewsFor(shots);
+    thumbs.innerHTML = views.map((v, i) => `<button class="thumb thumb-img" style="background-image:${esc(cssUrl(v.src))}" aria-label="${v.label}"><span>${v.label}</span></button>`).join('');
+    $$('.thumb', thumbs).forEach((t, i) => t.addEventListener('click', () => v2.go(i)));
+    await v2.setViews(views, { flip: !first });
+    if (first) {
+      const want = new URLSearchParams(location.search).get('view');
+      if (want === 'back') v2.go(Math.max(0, views.findIndex(v => v.label === 'BACK')));
+    }
+  };
+  window.addEventListener('thryftly:shots', e => show(e.detail));
+  show(currentShots, true);
+  if (!reduced) gsap.from('.details > *', { rotationX: -15, y: 24, opacity: 0, transformPerspective: 1200, transformOrigin: '50% 0%', stagger: 0.08, duration: 0.9, ease: 'power3.out' });
+}
+
+/* 3D (off, see USE_3D). */
+if (viewer && USE_3D) {
   let g3d = null, gm = null;
   const tt = spinner(viewer, $('.turntable'), {
     speed: 30,

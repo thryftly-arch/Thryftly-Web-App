@@ -296,6 +296,42 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .drop-grid { position: relative; padding: 0; }
 .live { cursor: pointer; }
 
+/* ---------- Card colour sliders ---------- */
+.pslides { position: absolute; inset: 0; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+.pslides::-webkit-scrollbar { display: none; }
+.pslides img { position: static !important; flex: 0 0 100%; width: 100%; height: 100%; object-fit: cover; scroll-snap-align: start; }
+.pnav { position: absolute; top: 50%; translate: 0 -50%; z-index: 2; width: 34px; height: 34px; background: rgba(255,255,255,.92); border: 2px solid #000; color: #000; font: 800 20px/1 var(--mono); opacity: 0; transition: opacity .2s, background .15s; }
+.pprev { left: 8px; } .pnext { right: 8px; }
+.pcard:hover .pnav, .pcard:focus-within .pnav { opacity: 1; }
+.pnav:hover { background: var(--yel); }
+.pdots { position: absolute; left: 0; right: 0; bottom: 10px; display: flex; justify-content: center; gap: 5px; z-index: 2; pointer-events: none; }
+.pdots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(0,0,0,.25); transition: width .25s, background .25s; }
+.pdots i.on { width: 16px; border-radius: 3px; background: #000; }
+.pcolour { position: absolute; right: 10px; top: 10px; z-index: 2; padding: 4px 7px; background: rgba(10,10,11,.8); color: #fff; font: 700 9px var(--mono); letter-spacing: .12em; }
+.pcolour:empty { display: none; }
+@media (hover: none) { .pnav { display: none; } }
+
+/* ---------- 2D product viewer ---------- */
+.viewer.is-2d .viewer-ring, .viewer.is-2d .viewer-ring-dash { z-index: 0; }
+.viewer.is-2d .turntable-stage, .viewer.is-2d .g3d { display: none; }
+.viewer.is-2d { cursor: default; }
+.stage2d { position: absolute; inset: 64px 40px 128px; display: none; align-items: center; justify-content: center; perspective: 1400px; outline: none; z-index: 1; }
+.viewer.is-2d .stage2d { display: flex; }
+.s2-card { position: relative; height: 100%; max-width: 100%; aspect-ratio: 4 / 5; overflow: hidden; background: #f2f2f2; border: 3px solid #000; box-shadow: 10px 10px 0 var(--red), 0 40px 90px rgba(0,0,0,.55); transform-style: preserve-3d; cursor: zoom-in; touch-action: pan-y; user-select: none; }
+.s2-card.zoomed { cursor: zoom-out; }
+.s2-track { display: flex; height: 100%; }
+.s2-slide { flex: 0 0 100%; height: 100%; margin: 0; overflow: hidden; }
+.s2-slide img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.s2-sheen { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .4s; mix-blend-mode: soft-light; }
+.s2-nav { position: absolute; top: 50%; translate: 0 -50%; width: 48px; height: 48px; border: 2px solid rgba(255,255,255,.35); background: rgba(10,10,11,.6); font: 800 18px var(--mono); z-index: 2; transition: background .15s, color .15s, border-color .15s; }
+.s2-nav:hover { background: var(--yel); color: #000; border-color: #000; }
+.s2-prev { left: 0; }
+.s2-next { right: 0; }
+.s2-nav[hidden] { display: none; }
+.thumb-img { position: relative; background-size: cover; background-position: center; background-color: #f2f2f2; color: #000; overflow: hidden; }
+.thumb-img span { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 0; background: rgba(10,10,11,.75); color: #fff; font: 700 8px var(--mono); letter-spacing: .1em; }
+.thumb-img.on { border: 2px solid var(--yel); box-shadow: 3px 3px 0 var(--red); }
+
 /* ---------- Content pages ---------- */
 .page { padding: 56px var(--gut) 96px; max-width: 1440px; margin: 0 auto; }
 .page-narrow { max-width: 860px; display: flex; flex-direction: column; gap: 28px; align-items: flex-start; }
@@ -415,6 +451,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   .footer-word { -webkit-text-stroke-width: 2px; text-shadow: 4px 4px 0 #000; }
 
   .viewer { min-height: 560px; }
+  .stage2d { inset: 70px 16px 120px; }
+  .s2-nav { width: 40px; height: 40px; }
   .viewer-ring { width: 320px; margin-left: -160px; height: 80px; bottom: 110px; }
   .viewer-ring-dash { width: 230px; margin-left: -115px; height: 46px; bottom: 128px; }
   .turntable-stage { width: 240px; height: 300px; }

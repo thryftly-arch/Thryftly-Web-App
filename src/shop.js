@@ -127,13 +127,45 @@ export const productUrl = p => `/product.html?p=${encodeURIComponent(p.slug)}`;
 export function productCard(p, i) {
   const soldOut = !p.sizes.some(z => z.available);
   const tag = p.unlocksAt ? '<span class="tag tag-yel">DROPS SOON</span>' : soldOut ? '<span class="tag tag-red">SOLD OUT</span>' : p.badge ? `<span class="tag tag-${p.badgeStyle === 'red' ? 'red' : 'yel'}">${esc(p.badge)}</span>` : '';
-  const img = p.images.front ? `<img src="${esc(p.images.front)}" alt="${esc(p.name)}" loading="lazy" decoding="async">` : '[ product shot ]';
+  // One slide per colour (its front photo), so shoppers can flick through colours on the card.
+  const colours = [...new Set(p.sizes.map(z => z.color).filter(Boolean))].filter(c => p.colorImages?.[c]);
+  const slides = colours.length > 1 ? colours.map(c => ({ c, src: p.colorImages[c] })) : p.images.front ? [{ c: colours[0] || '', src: p.images.front }] : [];
+  const media = !slides.length ? '[ product shot ]' : `
+      <div class="pslides">${slides.map((s, k) => `<img src="${esc(s.src)}" alt="${esc(p.name)}${s.c ? ' — ' + esc(s.c) : ''}" data-c="${esc(s.c)}" ${k ? 'loading="lazy"' : 'loading="lazy" decoding="async"'} draggable="false">`).join('')}</div>
+      ${slides.length > 1 ? `<button class="pnav pprev" type="button" aria-label="Previous colour" tabindex="-1">‹</button><button class="pnav pnext" type="button" aria-label="Next colour" tabindex="-1">›</button>
+      <div class="pdots">${slides.map((_, k) => `<i${k ? '' : ' class="on"'}></i>`).join('')}</div><span class="pcolour">${esc(slides[0].c)}</span>` : ''}`;
   return `<div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${productUrl(p)}">
-    <div class="pimg${p.images.front ? ' has-img' : ''}">${img}${tag}</div>
+    <div class="pimg${slides.length ? ' has-img' : ''}">${media}${tag}</div>
     <div class="pinfo"><span class="pname">${esc(p.name)}${p.edition ? ' ' + esc(p.edition.replace('/', '/ ')) : ''}</span>
     <div class="pmeta"><span>${esc([sizeRange(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${money(p.price)}</span></div></div>
   </a></div>`;
 }
+
+// Card colour sliders (one handler for every card on the page, however it was rendered).
+// Arrows scroll a card's photos; the scroll position picks the dot, the colour label and the
+// colour the card opens the product in.
+function slidesOf(el) { return el.closest('.pimg')?.querySelector('.pslides'); }
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.pnav');
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = slidesOf(btn);
+  box.scrollBy({ left: (btn.classList.contains('pnext') ? 1 : -1) * box.clientWidth, behavior: 'smooth' });
+}, true);
+document.addEventListener('scroll', e => {
+  const box = e.target;
+  if (!(box instanceof Element) || !box.classList.contains('pslides')) return;
+  const k = Math.round(box.scrollLeft / box.clientWidth), img = box.children[k];
+  if (!img) return;
+  const pimg = box.closest('.pimg');
+  pimg.querySelectorAll('.pdots i').forEach((d, j) => d.classList.toggle('on', j === k));
+  const label = pimg.querySelector('.pcolour');
+  if (label) label.textContent = img.dataset.c;
+  const a = box.closest('a');
+  const u = new URL(a.href, location.origin);
+  img.dataset.c ? u.searchParams.set('c', img.dataset.c) : u.searchParams.delete('c');
+  a.href = u.pathname + u.search;
+}, true);
 
 // Plain admin text → paragraphs. Blank line = new paragraph, "- " lines = list.
 export function richText(t) {
