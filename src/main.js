@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -37,50 +37,62 @@ bindSettings(site.settings);
 const url = productUrl;
 const imgStyle = u => (u ? ` style="background-image:${esc(cssUrl(u))}"` : '');
 
-/* ---------- Countdown ---------- */
-const cds = $$('.countdown');
-if (cds.length) {
-  const target = Date.parse(site.settings.countdownTarget) || 0;
-  const p = n => String(n).padStart(2, '0');
-  const tick = () => {
-    const t = Math.max(0, Math.floor((target - Date.now()) / 1000));
-    const s = [Math.floor(t / 86400), Math.floor(t % 86400 / 3600), Math.floor(t % 3600 / 60), t % 60].map(p).join(':');
-    cds.forEach(c => (c.textContent = s));
-  };
-  tick();
-  setInterval(tick, 1000);
-}
-
 /* ---------- Home render ---------- */
 if (isHome) {
-  const { settings: s, products } = site;
+  const { settings: s, products, drops } = site;
+  const bySlug = Object.fromEntries(products.map(p => [p.slug, p]));
   if (s.heroImage) $('.bolt-float').innerHTML = `<img class="hero-img" src="${esc(s.heroImage)}" alt="">`;
 
-  const run = s.marquee.map(m => `<span>${esc(m)}</span><span class="sl">///</span>`).join('');
+  // Hero: a live drop takes over the kicker, button and countdown; otherwise the plain copy shows.
+  const drop = drops[0];
+  if (drop) {
+    $$('.kicker, .m-kicker').forEach(el => (el.textContent = [drop.name, drop.tagline].filter(Boolean).join(' // ')));
+    $$('.hero-cta').forEach(a => { a.textContent = `SHOP ${drop.name} →`; a.href = `#drop-${drop.id}`; });
+    const clock = dropClock(drop);
+    if (clock) {
+      $$('.hero-count-label').forEach(el => (el.textContent = `${drop.name} ${clock.label}`));
+      $$('.hero-count').forEach(el => (el.dataset.target = clock.target));
+      $$('.countdown-block, .m-countdown').forEach(el => (el.hidden = false));
+    }
+  }
+
+  const run = [...(drop ? [`${drop.name} — ${drop.tagline || 'OUT NOW'}`] : []), ...s.marquee].map(m => `<span>${esc(m)}</span><span class="sl">///</span>`).join('');
   $('.marquee-track').innerHTML = run + run.replace(/<span/g, '<span aria-hidden="true"');
 
-  const ring = products.filter(p => p.inRotation);
-  const r = Math.max(420, Math.round(ring.length * 260 / (2 * Math.PI)));
-  $('.ring').style.setProperty('--r', r + 'px');
-  $('.ring-count').textContent = String(ring.length).padStart(2, '0');
-  $('.ring').innerHTML = ring.map((p, i) => `
-    <a class="ring-card ${i % 2 ? 'b-red' : 'b-yel'}" href="${url(p)}" style="--a:${(360 / ring.length) * i}deg" draggable="false">
-      <div class="ring-img${p.images.front ? ' has-img' : ''}"${imgStyle(p.images.front)}>[ ${esc(p.ringLabel || p.name.toLowerCase())} ]</div>
-      <div class="ring-t"><span>${esc(p.name)}</span><span class="yel">${money(p.price)}</span></div>
-    </a>`).join('');
+  // Special drops: one section each.
+  $('#drops').innerHTML = drops.map(d => {
+    const clock = dropClock(d);
+    const items = d.products.map(slug => bySlug[slug]).filter(Boolean);
+    return `<section class="drop-sec" id="drop-${esc(d.id)}">
+      ${d.banner ? `<div class="drop-bg" style="background-image:${esc(cssUrl(d.banner))}"></div>` : ''}
+      <div class="drop-head">
+        <div class="drop-title"><span class="drop-kicker">SPECIAL DROP${d.tagline ? ' // ' + esc(d.tagline) : ''}</span><h2 class="drop-name">${esc(d.name)}</h2></div>
+        <div class="drop-side">${d.description ? `<p>${esc(d.description)}</p>` : ''}
+          ${clock ? `<div class="drop-clock"><span>${clock.label}</span><span class="countdown" data-target="${esc(clock.target)}"></span></div>` : ''}</div>
+      </div>
+      <div class="grid drop-grid">${items.map(productCard).join('')}</div>
+    </section>`;
+  }).join('');
+
+  // The line-up: one section per category, biggest first.
+  const cats = Object.entries(products.reduce((m, p) => ((m[p.category] ||= []).push(p), m), {})).sort((a, b) => b[1].length - a[1].length);
+  $('.shop-all').textContent = `SHOP ALL ${products.length} →`;
+  $('.cat-secs').innerHTML = cats.map(([c, list]) => `
+    <div class="cat-sec">
+      <div class="cat-head"><h3 class="cat-h">${esc(catLabel(c))} <span>${list.length}</span></h3>
+        <a class="cat-all" href="/shop.html?c=${encodeURIComponent(c)}">VIEW ALL ${esc(catLabel(c))} →</a></div>
+      <div class="grid cat-grid">${list.filter(p => p.featured).concat(list.filter(p => !p.featured)).slice(0, 4).map(productCard).join('')}</div>
+    </div>`).join('');
 
   const featured = products.filter(p => p.featured).slice(0, 8);
-  $('#shop').innerHTML = featured.map(productCard).join('');
-  $('.shop-all').textContent = `SHOP ALL ${products.length} PIECES →`;
-
   $('.m-strip').innerHTML = featured.map((p, i) => `
     <a class="m-card${i < 2 ? (i ? ' sh-yel' : ' sh-red') : ''}" href="${url(p)}">
       <div class="m-card-img"${imgStyle(p.images.front)}></div><div class="m-card-t">${esc(p.name)} · ${money(p.price)}</div></a>`).join('');
-
 }
+startCountdowns();
 
 /* ---------- Product render ---------- */
-let product;
+let product, currentShots = { front: '', back: '' };
 if (isProduct) {
   const slug = new URLSearchParams(location.search).get('p');
   product = site.products.find(p => p.slug === slug) || site.products[0];
@@ -110,7 +122,29 @@ if (isProduct) {
   let color = colors.find(c => p.sizes.some(v => v.color === c && v.available)) ?? colors[0] ?? '';
   let size;
   const add = $('.add-cart');
+  function face(el, u, label) {
+    el.style.backgroundImage = u ? cssUrl(u) : '';
+    el.classList.toggle('has-img', !!u);
+    el.querySelector('.tt-ph').textContent = `[ ${p.name.toLowerCase()} — ${label} ]`;
+  }
   if (colors.length) $('.sizes').insertAdjacentHTML('beforebegin', '<div class="sizes colors"><span class="sizes-label">COLOUR — <span class="p-color"></span></span><div class="sizes-row colors-row"></div></div>');
+
+  // Front + back photos for the selected colour. A colour without its own back photo gets a
+  // plain back (3D) rather than another colour's print.
+  const shots = () => ({
+    front: p.colorImages?.[color] || p.images.front,
+    back: colors.length ? p.colorBacks?.[color] || '' : p.images.back,
+  });
+  let shown = '';
+  function showShots() {
+    const { front, back } = shots();
+    if (shown === front + back) return;
+    shown = front + back;
+    currentShots = { front, back };
+    face($('.tt-front'), front, 'front');
+    face($('.tt-back'), back, 'back');
+    window.dispatchEvent(new CustomEvent('thryftly:shots', { detail: { front, back } }));
+  }
 
   function drawVariants() {
     const vs = p.sizes.filter(v => (v.color || '') === color);
@@ -126,10 +160,10 @@ if (isProduct) {
     // Variants can cost more (e.g. 3XL) and each colour can have its own mockup.
     const v = vs.find(v => v.label === size);
     $('.p-price').textContent = money(v?.price || p.price);
-    const shot = p.colorImages?.[color];
-    if (shot || colors.length) { const f = $('.tt-front'); f.style.backgroundImage = cssUrl(shot || p.images.front); f.classList.toggle('has-img', !!(shot || p.images.front)); }
-    add.disabled = !size;
-    if (!size) add.textContent = 'SOLD OUT';
+    showShots();
+    add.disabled = !size || !!p.unlocksAt;
+    if (p.unlocksAt) add.textContent = `DROPS ${new Date(p.unlocksAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).toUpperCase()}`;
+    else if (!size) add.textContent = 'SOLD OUT';
     else if (add.textContent === 'SOLD OUT') add.textContent = 'ADD TO CART →';
   }
   drawVariants();
@@ -142,13 +176,6 @@ if (isProduct) {
     gsap.fromTo('.cart-btn', { rotationY: 0 }, { rotationY: 360, transformPerspective: 400, duration: 0.6, ease: 'power2.out' });
   });
 
-  const face = (el, u, label) => {
-    el.style.backgroundImage = u ? cssUrl(u) : '';
-    el.classList.toggle('has-img', !!u);
-    el.querySelector('.tt-ph').textContent = `[ 3D model / ${p.name.toLowerCase()} — ${label} ]`;
-  };
-  face($('.tt-front'), p.images.front, 'front');
-  face($('.tt-back'), p.images.back, 'back');
 
   $('.fav').addEventListener('click', e => {
     const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
@@ -165,7 +192,8 @@ if (isProduct) {
 
 /* ---------- Drag-to-spin helper (ring + turntable) ---------- */
 // Returns a live state object; angle = auto spin + drag + scroll offset.
-function spinner(stage, target, { speed, base = '', sens = 0.4 }) {
+function spinner(stage, target, { speed, base = '', sens = 0.4, apply }) {
+  apply ||= a => (target.style.transform = `${base} rotateY(${a}deg)`);
   const s = { auto: 0, drag: 0, scroll: 0, paused: false };
   let lastX = null, moved = 0, last = performance.now();
   stage.addEventListener('pointerdown', e => {
@@ -191,49 +219,127 @@ function spinner(stage, target, { speed, base = '', sens = 0.4 }) {
   (function frame(now) {
     if (!s.paused && lastX === null && !reduced) s.auto += speed * (now - last) / 1000;
     last = now;
-    target.style.transform = `${base} rotateY(${s.auto + s.drag + s.scroll}deg)`;
+    apply(s.auto + s.drag + s.scroll);
     requestAnimationFrame(frame);
   })(last);
   return s;
 }
 
-/* ---------- Home: rotation ring ---------- */
-const ringStage = $('.ring-stage');
-if (ringStage) {
-  const ring = spinner(ringStage, $('.ring'), { speed: -12, base: 'rotateX(-8deg)' });
-  if (!reduced) {
-    // Pin the section and wind the ring with the scroll.
-    gsap.to(ring, {
-      scroll: -120, ease: 'none',
-      scrollTrigger: { trigger: '.rotation', start: 'top top', end: '+=60%', pin: true, scrub: SCRUB },
-    });
+/* ---------- Home: the ring (3D carousel) ---------- */
+// Turns piece by piece: auto-advances, drags freely and snaps to the nearest piece, arrows and
+// keys step through. The front card is lit, the rest fall back into the dark.
+const ringEl = $('.ring');
+if (ringEl) {
+  const list = site.products.filter(p => p.inRotation);
+  const n = list.length;
+  const step = 360 / Math.max(n, 1);
+  const r = Math.max(440, Math.round(n * 300 / (2 * Math.PI)));
+  ringEl.style.setProperty('--r', r + 'px');
+  const colours = p => new Set(p.sizes.map(z => z.color).filter(Boolean)).size;
+  ringEl.innerHTML = list.map((p, i) => `
+    <a class="ring-card" href="${url(p)}" style="--a:${step * i}deg" draggable="false" aria-label="${esc(p.name)}">
+      <div class="ring-img${p.images.front ? ' has-img' : ''}"${imgStyle(p.images.front)}>[ ${esc(p.ringLabel || p.name.toLowerCase())} ]</div>
+      <div class="ring-t"><span>${esc(p.name)}</span><span class="yel">${money(p.price)}</span></div>
+    </a>`).join('');
+  const cards = $$('.ring-card', ringEl);
+  const st = { angle: 0 };
+  let index = 0, dragging = null, moved = 0, hover = false, tween;
+
+  function info() {
+    const p = list[index];
+    if (!p) return;
+    $('.ring-idx').textContent = `${String(index + 1).padStart(2, '0')} / ${String(n).padStart(2, '0')}`;
+    $('.ring-name').textContent = p.name;
+    $('.ring-name').href = url(p);
+    $('.ring-meta').textContent = [money(p.price), colours(p) > 1 ? `${colours(p)} COLOURS` : '', catLabel(p.category)].filter(Boolean).join(' · ');
   }
+  function go(i, dur = 0.9) {
+    index = ((i % n) + n) % n;
+    let to = -index * step;
+    to += 360 * Math.round((st.angle - to) / 360); // the short way round
+    tween?.kill();
+    tween = gsap.to(st, { angle: to, duration: reduced ? 0 : dur, ease: 'power3.out' });
+    info();
+  }
+
+  (function frame() {
+    ringEl.style.transform = `translateZ(${-r}px) rotateX(-6deg) rotateY(${st.angle}deg)`;
+    cards.forEach((c, i) => {
+      const rel = ((st.angle + i * step) % 360 + 540) % 360 - 180; // card's angle from the front
+      const f = (Math.cos(rel * Math.PI / 180) + 1) / 2;
+      c.style.opacity = (0.15 + 0.85 * f ** 1.5).toFixed(3);
+      c.style.filter = `brightness(${(0.35 + 0.65 * f).toFixed(3)})`;
+      c.classList.toggle('front', Math.abs(rel) < step / 2);
+    });
+    requestAnimationFrame(frame);
+  })();
+
+  const stage = $('.ring-stage');
+  stage.addEventListener('pointerdown', e => { dragging = e.clientX; moved = 0; tween?.kill(); });
+  stage.addEventListener('pointermove', e => {
+    if (dragging === null) return;
+    const dx = e.clientX - dragging;
+    dragging = e.clientX; moved += Math.abs(dx);
+    st.angle += dx * 0.3;
+    if (moved > 5 && !stage.hasPointerCapture(e.pointerId)) { stage.setPointerCapture(e.pointerId); stage.classList.add('dragging'); }
+  });
+  const release = () => { if (dragging === null) return; dragging = null; stage.classList.remove('dragging'); go(Math.round(-st.angle / step), 0.6); };
+  stage.addEventListener('pointerup', release);
+  stage.addEventListener('pointercancel', release);
+  // Clicking a side card brings it to the front; clicking the front card opens it.
+  stage.addEventListener('click', e => {
+    const c = e.target.closest('.ring-card');
+    if (moved > 5 || (c && !c.classList.contains('front'))) { e.preventDefault(); if (c && moved <= 5) go(cards.indexOf(c)); }
+  }, true);
+  $('.ring-prev').addEventListener('click', () => go(index - 1));
+  $('.ring-next').addEventListener('click', () => go(index + 1));
+  $('.rotation').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') go(index - 1); if (e.key === 'ArrowRight') go(index + 1); });
+  $('.rotation').addEventListener('pointerenter', () => (hover = true));
+  $('.rotation').addEventListener('pointerleave', () => (hover = false));
+  // Auto-advance only while visible and not being handled.
+  let inView = false;
+  new IntersectionObserver(([e]) => (inView = e.isIntersecting)).observe(stage);
+  if (!reduced) setInterval(() => { if (inView && !hover && dragging === null && !document.hidden) go(index + 1); }, 3200);
+  info();
 }
 
-/* ---------- Product: turntable viewer ---------- */
+/* ---------- Product: 3D garment viewer ---------- */
 const viewer = $('.viewer');
 if (viewer) {
-  const tt = spinner(viewer, $('.turntable'), { speed: 30 });
+  let g3d = null;
+  const tt = spinner(viewer, $('.turntable'), {
+    speed: 30,
+    apply: a => { $('.turntable').style.transform = `rotateY(${a}deg)`; g3d?.setAngle(a); },
+  });
+  const photo = $('.viewer-photo');
   $$('.thumb').forEach(b => b.addEventListener('click', () => {
     $$('.thumb').forEach(x => x.classList.toggle('on', x === b));
-    // DETAIL / ON BODY swap their photo onto the front face
-    const sel = $('.colors-row .size.on')?.textContent;
-    const u = b.dataset.img === 'front' ? product.colorImages?.[sel] || product.images.front : product.images[b.dataset.img];
-    if (b.dataset.angle === '0') {
-      const front = $('.tt-front');
-      front.style.backgroundImage = cssUrl(u || product.images.front);
-      front.classList.toggle('has-img', !!(u || product.images.front));
-    }
+    // DETAIL / ON BODY are flat photos shown over the model; FRONT / BACK turn the model.
+    const flat = b.dataset.img === 'detail' || b.dataset.img === 'onBody' ? product.images[b.dataset.img] : '';
+    photo.hidden = !flat;
+    if (flat) photo.src = flat;
     tt.paused = true;
     const cur = tt.auto + tt.drag + tt.scroll;
     const delta = ((+b.dataset.angle - cur) % 360 + 540) % 360 - 180; // shortest way round
     gsap.to(tt, { auto: tt.auto + delta, duration: reduced ? 0 : 0.9, ease: 'power3.inOut' });
   }));
-  viewer.addEventListener('pointerdown', e => { if (!e.target.closest('button')) tt.paused = false; });
+  viewer.addEventListener('pointerdown', e => { if (!e.target.closest('button')) { tt.paused = false; photo.hidden = true; } });
+
+  // Build the 3D garment from the photos; keep the flat card when a photo can't be cut out.
+  let pending = Promise.resolve();
+  const rebuild = ({ front, back }) => (pending = pending.then(async () => {
+    if (!front) return viewer.classList.remove('is-3d');
+    try {
+      g3d ||= await (await import('./garment3d.js')).mountGarment($('.g3d'));
+      viewer.classList.toggle('is-3d', !!(g3d && await g3d.build(front, back)));
+    } catch { viewer.classList.remove('is-3d'); }
+  }));
+  window.addEventListener('thryftly:shots', e => rebuild(e.detail));
+  rebuild(currentShots);
 
   if (!reduced) {
     gsap.from('.details > *', { rotationX: -15, y: 24, opacity: 0, transformPerspective: 1200, transformOrigin: '50% 0%', stagger: 0.08, duration: 0.9, ease: 'power3.out' });
-    gsap.from('.turntable-stage', { rotationX: 12, scale: 0.9, opacity: 0, duration: 1.2, ease: 'power3.out' });
+    gsap.from('.turntable-stage, .g3d', { scale: 0.9, opacity: 0, duration: 1.2, ease: 'power3.out' });
     gsap.to(tt, { scroll: 180, ease: 'none', scrollTrigger: { trigger: viewer, start: 'top top', end: 'bottom top', scrub: SCRUB } });
   }
 }
@@ -260,6 +366,8 @@ if (isHome && !reduced) {
       scrollTrigger: { trigger: '.rotation', start: 'top 85%', end: 'top 35%', scrub: SCRUB } });
     gsap.from('.ring-stage', { scale: 0.85, y: 40, ease: 'none',
       scrollTrigger: { trigger: '.rotation', start: 'top 80%', end: 'top 20%', scrub: SCRUB } });
+    $$('.cat-h, .drop-name').forEach(h => gsap.from(h, { rotationY: 20, x: -24, opacity: 0, transformPerspective: 1200, transformOrigin: '0% 50%', ease: 'none',
+      scrollTrigger: { trigger: h, start: 'top 92%', end: 'top 60%', scrub: SCRUB } }));
 
     // Product cards rise and flip up out of the floor.
     $$('.pwrap').forEach((w, i) => {

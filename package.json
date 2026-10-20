@@ -16,7 +16,8 @@
     "express-rate-limit": "^8.7.1",
     "gsap": "^3.12.5",
     "helmet": "^8.3.0",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "concurrently": "^9.2.5",

@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>THRYFTLY — Drop 07</title>
+  <title>THRYFTLY — Streetwear, printed to order</title>
+  <meta name="description" content="Oversized tees, hoodies and sweatshirts with bold graphics, printed to order and shipped across India.">
   <link rel="icon" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,25 +20,25 @@
       <div class="hero-outline">THRYFTLY</div>
 
       <div class="hero-copy d-only">
-        <span class="kicker" data-s="kicker">DROP 07 // STATIC SEASON // 300 UNITS</span>
+        <span class="kicker" data-s="kicker"></span>
         <h1 class="hero-h1"><span data-s="heroTitle">WEAR THE</span> <span class="volt" data-s="heroAccent">VOLTAGE.</span></h1>
         <p class="hero-p" data-s="heroText">Rescued vintage, reworked by hand and charged for the street. Every piece is a one-off. When it's gone, it's archived.</p>
         <div class="hero-ctas">
-          <a class="btn-red" href="#shop" data-s="ctaLabel">SHOP DROP 07 →</a>
-          <a class="btn-ghost" href="#rotation" data-s="secondaryCta">VIEW LOOKBOOK</a>
+          <a class="btn-red hero-cta" href="#lineup" data-s="ctaLabel"></a>
+          <a class="btn-ghost" href="#rotation" data-s="secondaryCta"></a>
         </div>
-        <div class="countdown-block">
-          <span class="countdown-label" data-s="countdownLabel">NEXT DROP UNLOCKS IN</span>
-          <span class="countdown countdown-lg">00:00:00:00</span>
+        <div class="countdown-block" hidden>
+          <span class="countdown-label hero-count-label"></span>
+          <span class="countdown countdown-lg hero-count"></span>
         </div>
       </div>
 
-      <span class="m-kicker m-only" data-s="mobileKicker">DROP 07 // LIVE</span>
+      <span class="m-kicker m-only" data-s="mobileKicker"></span>
       <div class="hero-stage"><div class="stage-inner">
         <div class="stage-ring d-only"></div>
         <div class="stage-ring-dash d-only"></div>
         <i class="corner tl d-only"></i><i class="corner tr d-only"></i><i class="corner bl d-only"></i><i class="corner br d-only"></i>
-        <span class="stage-spec d-only">OBJ: BOLT_07<br>ROT: 360°/8S<br>DEPTH: 24MM<br><span class="red">● CHARGED</span></span>
+        <span class="stage-spec d-only">OBJ: BOLT<br>ROT: 360°/8S<br>DEPTH: 24MM<br><span class="red">● CHARGED</span></span>
         <div class="bolt-float">
           <div class="bolt3d spin" data-depth="24"></div>
         </div>
@@ -46,8 +47,8 @@
 
     <div class="m-hero-copy m-only">
       <h1 class="hero-h1"><span data-s="heroTitle">WEAR THE</span> <span class="volt" data-s="heroAccent">VOLTAGE.</span></h1>
-      <div class="m-countdown"><span>NEXT DROP</span><span class="countdown">00:00:00:00</span></div>
-      <a class="btn-red" href="#shop" data-s="ctaLabel">SHOP DROP 07 →</a>
+      <div class="m-countdown" hidden><span class="hero-count-label"></span><span class="countdown hero-count"></span></div>
+      <a class="btn-red hero-cta" href="#lineup" data-s="ctaLabel"></a>
     </div>
     <div class="m-strip m-only"></div>
 
@@ -55,18 +56,35 @@
       <div class="marquee-track"></div>
     </div>
 
-    <section class="rotation" id="rotation">
+    <div id="drops"></div>
+
+    <section class="rotation" id="rotation" tabindex="-1" aria-roledescription="carousel">
       <div class="sec-head">
-        <h2 class="sec-h2" data-s="rotationTitle">THE ROTATION</h2>
-        <span class="sec-meta"><span class="ring-count">06</span> PIECES · DRAG TO SPIN</span>
+        <h2 class="sec-h2" data-s="rotationTitle"></h2>
+        <span class="sec-meta">DRAG · SWIPE · ← →</span>
       </div>
       <div class="ring-stage">
+        <div class="ring-floor"></div>
         <div class="ring"></div>
+      </div>
+      <div class="ring-ui">
+        <button class="ring-btn ring-prev" aria-label="Previous piece">←</button>
+        <div class="ring-info" aria-live="polite">
+          <span class="ring-idx"></span>
+          <a class="ring-name" href="#"></a>
+          <span class="ring-meta"></span>
+        </div>
+        <button class="ring-btn ring-next" aria-label="Next piece">→</button>
       </div>
     </section>
 
-    <section class="grid" id="shop"></section>
-    <div class="shop-all-row"><a class="btn-red shop-all" href="/shop.html">SHOP ALL →</a></div>
+    <section class="lineup" id="lineup">
+      <div class="sec-head">
+        <h2 class="sec-h2" data-s="productsTitle"></h2>
+        <a class="sec-meta shop-all" href="/shop.html"></a>
+      </div>
+      <div class="cat-secs"></div>
+    </section>
   </main>
 
   <footer class="footer" data-chrome></footer>

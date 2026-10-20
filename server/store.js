@@ -25,20 +25,21 @@ const SEED = () => ({
     shippingFee: 0,
     freeShippingOver: 150,
     dropLabel: 'DROP 07',
-    liveLabel: 'DROP 07 LIVE',
-    kicker: 'DROP 07 // STATIC SEASON // 300 UNITS',
-    mobileKicker: 'DROP 07 // LIVE',
+    liveLabel: '',
+    kicker: 'PRINTED TO ORDER // SHIPPED ACROSS INDIA',
+    mobileKicker: 'PRINTED TO ORDER',
     heroTitle: 'WEAR THE',
     heroAccent: 'VOLTAGE.',
     heroText: "Rescued vintage, reworked by hand and charged for the street. Every piece is a one-off. When it's gone, it's archived.",
-    ctaLabel: 'SHOP DROP 07 →',
-    secondaryCta: 'VIEW LOOKBOOK',
+    ctaLabel: 'SHOP NOW →',
+    secondaryCta: 'TRENDING NOW',
     countdownLabel: 'NEXT DROP UNLOCKS IN',
     countdownTarget: new Date(Date.now() + (2 * 86400 + 14 * 3600 + 37 * 60) * 1000).toISOString(),
     heroImage: '',
-    marquee: ['DROP 07 — STATIC SEASON', 'ONE-OFF REWORKED VINTAGE', '300 UNITS ONLY', 'FREE SHIPPING OVER $150'],
-    rotationTitle: 'THE ROTATION',
-    signupTitle: 'GET THE DROP ALERT.',
+    marquee: ['PRINTED TO ORDER', 'OVERSIZED FITS', 'HOODIES · TEES · SWEATSHIRTS', 'SHIPPED ACROSS INDIA'],
+    rotationTitle: 'TRENDING NOW',
+    productsTitle: 'ALL PRODUCTS',
+    signupTitle: 'BE FIRST TO KNOW.',
     footerWord: 'THRYFTLY',
     socials: { instagram: '', tiktok: '', discord: '' },
     contact: { email: '', phone: '', whatsapp: '', address: '', hours: '' },
@@ -53,6 +54,8 @@ const SEED = () => ({
     terms: { title: 'TERMS OF SERVICE', body: "By using this site and placing an order, you agree to these terms.\n\n# ORDERS & PRICING\nAll prices are in Indian Rupees and include applicable taxes unless stated. We may cancel an order and refund you in full if a product is unavailable or mispriced.\n\n# PRODUCTS\nColours on screen can differ slightly from the printed product. Sizes follow the size guide on each product.\n\n# INTELLECTUAL PROPERTY\nAll designs, graphics and content on this site belong to THRYFTLY and may not be reused without permission.\n\n# CONTACT\n[Business name, address and email]." },
   },
   messages: [],
+  // Special drops, managed in Admin → Drops. Off by default.
+  drops: [],
   products: [
     {
       id: id(), slug: 'volt-hoodie', name: 'VOLT HOODIE', edition: '/07', price: 128, category: 'OUTERWEAR',
@@ -79,6 +82,12 @@ const seed = SEED();
 for (const [k, v] of Object.entries(seed.settings)) if (!(k in db.settings)) db.settings[k] = v;
 db.pages = { ...seed.pages, ...db.pages };
 db.messages ??= [];
+db.drops ??= [];
+// Copy that only made sense for the mockup's "Drop 07": swap it for the new defaults, but only
+// where it was never edited (still exactly the old text).
+const OLD = { liveLabel: 'DROP 07 LIVE', kicker: 'DROP 07 // STATIC SEASON // 300 UNITS', mobileKicker: 'DROP 07 // LIVE', ctaLabel: 'SHOP DROP 07 →', secondaryCta: 'VIEW LOOKBOOK', rotationTitle: 'THE ROTATION', signupTitle: 'GET THE DROP ALERT.' };
+for (const [k, v] of Object.entries(OLD)) if (db.settings[k] === v) db.settings[k] = seed.settings[k];
+if (db.settings.marquee?.some(m => /DROP 07|REWORKED VINTAGE|300 UNITS/.test(m))) db.settings.marquee = seed.settings.marquee;
 
 export function save() {
   const tmp = DB_FILE + '.tmp';

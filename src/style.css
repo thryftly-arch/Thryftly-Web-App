@@ -236,6 +236,60 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .pimg .tag { z-index: 1; }
 .shop-all-row { display: flex; justify-content: center; padding: 0 var(--gut) 96px; margin-top: -40px; }
 
+/* ---------- 3D garment viewer ---------- */
+.g3d { position: absolute; inset: 70px 0 130px; z-index: 1; }
+.g3d canvas { width: 100% !important; height: 100% !important; display: block; }
+.viewer:not(.is-3d) .g3d { visibility: hidden; }
+.viewer.is-3d .turntable-stage { visibility: hidden; }
+.viewer-photo { position: absolute; inset: 70px 32px 130px; width: calc(100% - 64px); height: calc(100% - 200px); object-fit: contain; z-index: 2; background: var(--ink); }
+.thumbs { z-index: 3; }
+
+/* ---------- The ring (3D carousel) ---------- */
+.rotation { outline: none; }
+.ring-stage { position: relative; }
+.ring { transition: none; }
+.ring-card { padding: 0; gap: 0; border-width: 2px; overflow: hidden; transition: border-color .3s, box-shadow .3s; }
+.ring-card .ring-img { flex: 1; }
+.ring-card .ring-img.has-img { background-color: #e9e6df; }
+.ring-card .ring-t { padding: 10px 12px; background: #141416; }
+.ring-card.front { border-color: var(--yel); box-shadow: 0 0 0 2px #000, 10px 10px 0 var(--red), 0 30px 80px rgba(255,59,59,.35); }
+.ring-card:not(.front) { border-color: rgba(255,255,255,.18); }
+.ring-floor { position: absolute; left: 50%; bottom: 26px; width: min(760px, 90%); height: 120px; transform: translateX(-50%); border-radius: 50%; border: 2px solid var(--red); box-shadow: 0 0 70px rgba(255,59,59,.4), inset 0 0 50px rgba(255,59,59,.25); pointer-events: none; }
+.ring-floor::after { content: ''; position: absolute; inset: 22px 18%; border-radius: 50%; border: 1px dashed rgba(255,216,77,.6); }
+.ring-ui { display: flex; align-items: center; justify-content: center; gap: 28px; padding: 8px var(--gut) 72px; }
+.ring-btn { width: 56px; height: 56px; border: 2px solid rgba(255,255,255,.35); font: 800 20px var(--mono); transition: border-color .15s, background .15s, color .15s; }
+.ring-btn:hover { border-color: var(--yel); background: var(--yel); color: #000; }
+.ring-info { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 280px; text-align: center; }
+.ring-idx { font: 700 11px var(--mono); letter-spacing: .2em; color: var(--yel); }
+.ring-name { font-stretch: 125%; font-weight: 900; font-style: italic; font-size: 30px; line-height: 1; letter-spacing: -.02em; }
+.ring-name:hover { color: var(--yel); }
+.ring-meta { font: 600 12px var(--mono); letter-spacing: .1em; color: rgba(255,255,255,.6); }
+
+/* ---------- Line-up + category sections ---------- */
+.lineup { border-top: 1px solid rgba(255,255,255,.1); padding-bottom: 72px; }
+.lineup .sec-head { padding-top: 88px; }
+.cat-sec { padding: 0 var(--gut); margin-bottom: 64px; }
+.shop-grid .cat-sec { padding: 0; }
+.cat-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 14px; margin-bottom: 24px; border-bottom: 3px solid #000; box-shadow: 0 3px 0 var(--red); }
+.cat-h { font-stretch: 125%; font-weight: 900; font-style: italic; font-size: 34px; line-height: 1; letter-spacing: -.02em; }
+.cat-h span { font: 700 12px var(--mono); letter-spacing: .14em; color: var(--yel); vertical-align: super; margin-left: 4px; }
+.cat-all { font: 700 12px var(--mono); letter-spacing: .14em; white-space: nowrap; }
+.cat-all:hover { color: var(--yel); }
+.cat-grid { padding: 0; }
+
+/* ---------- Special drops ---------- */
+.drop-sec { position: relative; overflow: hidden; background: var(--red); color: #000; border-top: 3px solid #000; border-bottom: 3px solid #000; padding: 72px var(--gut) 80px; }
+.drop-bg { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: .22; mix-blend-mode: multiply; }
+.drop-head { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 32px; align-items: end; margin-bottom: 40px; }
+.drop-kicker { font: 700 12px var(--mono); letter-spacing: .18em; }
+.drop-name { font-stretch: 125%; font-weight: 900; font-style: italic; font-size: clamp(56px, 9vw, 140px); line-height: .85; letter-spacing: -.04em; color: var(--yel); -webkit-text-stroke: 2.5px #000; text-shadow: 6px 6px 0 #000; margin-top: 10px; }
+.drop-side { display: flex; flex-direction: column; gap: 18px; font-size: 16px; line-height: 1.55; }
+.drop-clock { display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; background: #000; color: var(--yel); border: 2px solid #000; box-shadow: 5px 5px 0 var(--yel); align-self: flex-start; }
+.drop-clock span:first-child { font: 700 10px var(--mono); letter-spacing: .18em; color: rgba(255,216,77,.75); }
+.drop-clock .countdown { font: 800 32px var(--mono); letter-spacing: .04em; }
+.drop-grid { position: relative; padding: 0; }
+.live { cursor: pointer; }
+
 /* ---------- Content pages ---------- */
 .page { padding: 56px var(--gut) 96px; max-width: 1440px; margin: 0 auto; }
 .page-narrow { max-width: 860px; display: flex; flex-direction: column; gap: 28px; align-items: flex-start; }
@@ -297,7 +351,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   .viewer { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.1); min-height: 720px; }
 }
 @media (max-width: 900px) {
-  .tryon-body, .co, .page-split { grid-template-columns: 1fr; }
+  .tryon-body, .co, .page-split, .drop-head { grid-template-columns: 1fr; }
+  .ring-info { min-width: 0; }
+  .ring-name { font-size: 22px; }
+  .cat-h { font-size: 26px; }
   .shop-tools { width: 100%; }
   .shop-search { flex: 1; width: auto; min-width: 0; }
 }
@@ -367,6 +424,12 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 @media (max-width: 480px) {
   .grid { grid-template-columns: 1fr; }
   .pimg { height: 300px; }
+  /* Category rows stay two-up on phones so the page doesn't run forever. */
+  .cat-grid, .drop-grid { grid-template-columns: 1fr 1fr; gap: 14px; }
+  .cat-grid .pimg, .drop-grid .pimg { height: 190px; }
+  .cat-grid .pname, .drop-grid .pname { font-size: 14px; }
+  .cat-grid .pmeta, .drop-grid .pmeta { font-size: 10px; flex-direction: column; gap: 2px; }
+  .cat-grid .pinfo, .drop-grid .pinfo { padding: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

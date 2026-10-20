@@ -64,3 +64,9 @@
   .adm-order summary { grid-template-columns: 1fr 1fr; }
   .adm-table .hide-sm { display: none; }
 }
+
+.adm-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; max-height: 420px; overflow: auto; padding: 4px; border: 1px solid rgba(255,255,255,.12); }
+.adm-pick-item { display: grid; grid-template-columns: auto 40px 1fr; gap: 10px; align-items: center; padding: 8px; border: 1px solid rgba(255,255,255,.1); font: 600 11px var(--mono); letter-spacing: .04em; color: #fff; cursor: pointer; }
+.adm-pick-item.on { border-color: var(--yel); background: rgba(255,216,77,.08); }
+.adm-pick-item .adm-thumb { width: 40px; height: 48px; }
+.adm-pick-item small { color: rgba(255,255,255,.5); }

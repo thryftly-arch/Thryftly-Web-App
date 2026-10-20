@@ -1,5 +1,5 @@
 // Shop all, About, Contact, Policies and Track order. One script, switched by <body data-page>.
-import { $, $$, esc, api, loadSite, money, bindSettings, mountChrome, productCard, richText } from './shop.js';
+import { $, $$, esc, api, loadSite, money, bindSettings, mountChrome, productCard, richText, catLabel } from './shop.js';
 
 const site = await loadSite();
 mountChrome();
@@ -18,12 +18,17 @@ if (page === 'shop') {
   $('.shop-sort').value = state.sort;
 
   function render() {
-    $('.chips').innerHTML = cats.map(c => `<button role="tab" class="chip${c === state.c ? ' on' : ''}" aria-selected="${c === state.c}" data-c="${esc(c)}">${esc(c)} <span>${c === 'ALL' ? site.products.length : counts[c]}</span></button>`).join('');
+    $('.chips').innerHTML = cats.map(c => `<button role="tab" class="chip${c === state.c ? ' on' : ''}" aria-selected="${c === state.c}" data-c="${esc(c)}">${esc(catLabel(c))} <span>${c === 'ALL' ? site.products.length : counts[c]}</span></button>`).join('');
     const q = state.q.trim().toLowerCase();
     let list = site.products.filter(p => (state.c === 'ALL' || p.category === state.c) && (!q || `${p.name} ${p.category} ${p.description}`.toLowerCase().includes(q)));
     const sorts = { low: (a, b) => a.price - b.price, high: (a, b) => b.price - a.price, az: (a, b) => a.name.localeCompare(b.name) };
     if (sorts[state.sort]) list = [...list].sort(sorts[state.sort]);
-    $('.shop-grid').innerHTML = list.map(productCard).join('');
+    // "All" with no search: one section per category. A filter or search: one flat grid.
+    const grouped = state.c === 'ALL' && !q;
+    $('.shop-grid').classList.toggle('grid', !grouped);
+    $('.shop-grid').innerHTML = grouped
+      ? cats.slice(1).map(c => { const g = list.filter(p => p.category === c); return g.length ? `<div class="cat-sec"><div class="cat-head"><h3 class="cat-h">${esc(catLabel(c))} <span>${g.length}</span></h3></div><div class="grid cat-grid">${g.map(productCard).join('')}</div></div>` : ''; }).join('')
+      : list.map(productCard).join('');
     $('.shop-empty').hidden = list.length > 0;
     $('.shop-count').textContent = `${list.length} PIECE${list.length === 1 ? '' : 'S'}`;
     // Keep the filter in the URL so it can be shared and survives the back button.

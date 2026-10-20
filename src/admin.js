@@ -47,7 +47,7 @@ async function boot() {
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ products: viewProducts, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
+  ({ products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -165,7 +165,7 @@ function editProduct(src) {
         <div class="adm-row" style="grid-template-columns:1fr auto;margin:6px 0"><input class="gen-colors" placeholder="Colours, comma separated (e.g. Black, Bone, Red)"><button type="button" class="gen">MAKE COLOUR × SIZE ROWS</button></div>
         <div class="adm-rows"></div><button type="button" class="adm-add">+ ADD VARIANT</button></div>
       <div class="adm-field full specs-box">SPECS<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SPEC</button></div>
-      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Each colour can have its own photo, shown when a customer picks that colour (save and reopen after adding colours). Try-on works best with a transparent PNG cut-out.</small><div class="adm-imgs"></div></div>
+      <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Each colour can have its own front and back photo, shown when a customer picks that colour (save and reopen after adding colours). A colour with no back photo gets a plain back in its own colour. Try-on works best with a transparent PNG cut-out.</small><div class="adm-imgs"></div></div>
       <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> LIVE ON SITE</label><label><input type="checkbox" name="featured"> IN PRODUCT GRID</label><label><input type="checkbox" name="inRotation"> IN THE ROTATION RING</label></div>
       <div class="adm-actions">${p.id ? '<button type="button" class="adm-danger del">DELETE PRODUCT</button>' : '<span></span>'}<button class="btn-red">SAVE PRODUCT</button></div>
     </form>`;
@@ -191,7 +191,11 @@ function editProduct(src) {
   [['front', 'FRONT'], ['back', 'BACK'], ['detail', 'DETAIL'], ['onBody', 'ON BODY']].forEach(([k, l]) => imgs.append(imgField(l, p.images[k], v => (p.images[k] = v))));
   imgs.append(imgField('TRY-ON CUT-OUT', p.tryonImage, v => (p.tryonImage = v)));
   p.colorImages ||= {};
-  for (const c of [...new Set(p.sizes.map(v => v.color).filter(Boolean))]) imgs.append(imgField(`COLOUR: ${c}`, p.colorImages[c], v => (p.colorImages[c] = v)));
+  p.colorBacks ||= {};
+  for (const c of [...new Set(p.sizes.map(v => v.color).filter(Boolean))]) {
+    imgs.append(imgField(`${c} — FRONT`, p.colorImages[c], v => (p.colorImages[c] = v)));
+    imgs.append(imgField(`${c} — BACK`, p.colorBacks[c], v => (p.colorBacks[c] = v)));
+  }
 
   $('.back', main()).addEventListener('click', viewProducts);
   $('.del', main())?.addEventListener('click', async () => {
@@ -209,11 +213,80 @@ function editProduct(src) {
   });
 }
 
+/* ---------- drops ---------- */
+const local = iso => { const d = new Date(iso); return isNaN(d) ? '' : new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16); };
+function dropState(d) {
+  const now = Date.now();
+  if (!d.active) return ['OFF', 'grey'];
+  if (d.endsAt && Date.parse(d.endsAt) < now) return ['ENDED', 'grey'];
+  if (d.startsAt && Date.parse(d.startsAt) > now) return ['COMING SOON', 'yel'];
+  return ['LIVE', 'green'];
+}
+async function viewDrops() {
+  const drops = await req('GET', '/drops');
+  main().innerHTML = `
+    <div class="adm-bar"><h1 class="adm-h">DROPS</h1><button class="btn-red new">+ NEW DROP</button></div>
+    <p class="adm-note">A drop is a special release. Switch one on and it gets its own section on the home page, the hero shows its name and countdown, and the header marks it live. Before its opening time its products can be seen but not bought. After its end time it disappears by itself and its products stay in the shop. With no drop on, none of this shows.</p>
+    <table class="adm-table"><thead><tr><th>DROP</th><th>OPENS</th><th>ENDS</th><th>PRODUCTS</th><th>STATUS</th><th></th></tr></thead><tbody></tbody></table>
+    ${drops.length ? '' : '<p class="adm-note" style="margin-top:16px">No drops yet.</p>'}`;
+  for (const d of drops) {
+    const [label, color] = dropState(d);
+    const tr = h(`<tr><td><b>${esc(d.name)}</b><br><small>${esc(d.tagline)}</small></td><td>${d.startsAt ? new Date(d.startsAt).toLocaleString() : 'now'}</td><td>${d.endsAt ? new Date(d.endsAt).toLocaleString() : 'no end'}</td><td>${d.productIds.length}</td><td><span class="adm-pill ${color}">${label}</span></td><td><button class="adm-link">EDIT</button></td></tr>`);
+    $('button', tr).addEventListener('click', () => editDrop(d));
+    $('tbody', main()).append(tr);
+  }
+  $('.new', main()).addEventListener('click', () => editDrop({ name: '', tagline: '', description: '', banner: '', startsAt: '', endsAt: '', active: false, productIds: [] }));
+}
+
+async function editDrop(src) {
+  const d = structuredClone(src);
+  const products = await req('GET', '/products');
+  main().innerHTML = `
+    <div class="adm-bar"><h1 class="adm-h">${d.id ? 'EDIT' : 'NEW'} DROP</h1><button class="btn-ghost back">← ALL DROPS</button></div>
+    <form class="adm-form">
+      <label class="adm-field">NAME <small>e.g. DROP 08</small><input name="name" value="${esc(d.name)}" required></label>
+      <label class="adm-field">TAGLINE <small>shown in the hero, e.g. STATIC SEASON // 300 UNITS</small><input name="tagline" value="${esc(d.tagline)}"></label>
+      <label class="adm-field">OPENS <small>empty = open now; before this, products can't be bought</small><input type="datetime-local" name="startsAt" value="${local(d.startsAt)}"></label>
+      <label class="adm-field">ENDS <small>empty = runs until you switch it off</small><input type="datetime-local" name="endsAt" value="${local(d.endsAt)}"></label>
+      <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(d.description)}</textarea></label>
+      <div class="adm-field full">BANNER IMAGE <small>optional, shown behind the drop section</small><div class="adm-imgs"></div></div>
+      <div class="adm-field full">PRODUCTS IN THIS DROP <small><span class="count"></span> selected</small>
+        <input class="pick-search" placeholder="Search products">
+        <div class="adm-pick"></div></div>
+      <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> DROP IS ON</label></div>
+      <div class="adm-actions">${d.id ? '<button type="button" class="adm-danger del">DELETE DROP</button>' : '<span></span>'}<button class="btn-red">SAVE DROP</button></div>
+    </form>`;
+  const form = $('.adm-form', main());
+  form.active.checked = !!d.active;
+  $('.adm-imgs', form).append(imgField('BANNER', d.banner, v => (d.banner = v)));
+  const picked = new Set(d.productIds);
+  const drawPick = () => {
+    const q = $('.pick-search', form).value.trim().toLowerCase();
+    // Selected first, then the rest; the search filters both.
+    const list = [...products].filter(p => !q || p.name.toLowerCase().includes(q)).sort((a, b) => picked.has(b.id) - picked.has(a.id));
+    $('.adm-pick', form).innerHTML = list.map(p => `<label class="adm-pick-item${picked.has(p.id) ? ' on' : ''}"><input type="checkbox" value="${p.id}" ${picked.has(p.id) ? 'checked' : ''}>
+      <span class="adm-thumb" style="background-image:${esc(cssUrl(p.images.front))}"></span><span>${esc(p.name)}<br><small>${esc(symbol)}${p.price}${p.active ? '' : ' · hidden'}</small></span></label>`).join('');
+    $('.count', form).textContent = picked.size;
+  };
+  $('.adm-pick', form).addEventListener('change', e => { e.target.checked ? picked.add(e.target.value) : picked.delete(e.target.value); drawPick(); });
+  $('.pick-search', form).addEventListener('input', drawPick);
+  drawPick();
+  $('.back', main()).addEventListener('click', viewDrops);
+  $('.del', main())?.addEventListener('click', async () => { if (confirm(`Delete ${d.name}?`)) { await req('DELETE', '/drops/' + d.id); toast('DELETED'); viewDrops(); } });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    const body = { ...d, ...fd, active: form.active.checked, productIds: [...picked],
+      startsAt: fd.startsAt ? new Date(fd.startsAt).toISOString() : '', endsAt: fd.endsAt ? new Date(fd.endsAt).toISOString() : '' };
+    try { const saved = await req(d.id ? 'PUT' : 'POST', '/drops' + (d.id ? '/' + d.id : ''), body); toast('SAVED'); editDrop(saved); } catch (err) { toast(err.message, true); }
+  });
+}
+
 /* ---------- site content ---------- */
 const SITE_FIELDS = [
   ['GLOBAL', [['currency', 'CURRENCY CODE', 'INR for Razorpay India; USD needs international payments enabled'], ['symbol', 'CURRENCY SYMBOL'], ['shippingFee', 'SHIPPING FEE'], ['freeShippingOver', 'FREE SHIPPING OVER', '0 = never free']]],
-  ['HEADER & HERO', [['liveLabel', 'LIVE LABEL'], ['dropLabel', 'DROP NAME'], ['kicker', 'HERO KICKER'], ['mobileKicker', 'MOBILE KICKER'], ['heroTitle', 'HEADLINE'], ['heroAccent', 'HEADLINE ACCENT'], ['heroText', 'HERO TEXT', '', 'textarea'], ['ctaLabel', 'MAIN BUTTON'], ['secondaryCta', 'SECOND BUTTON'], ['countdownLabel', 'COUNTDOWN LABEL'], ['countdownTarget', 'NEXT DROP DATE & TIME', '', 'datetime']]],
-  ['SECTIONS & FOOTER', [['rotationTitle', 'RING TITLE'], ['signupTitle', 'SIGN-UP TITLE'], ['footerWord', 'FOOTER WORDMARK']]],
+  ['HERO', [['kicker', 'HERO KICKER', 'small line above the headline (a live drop replaces it)'], ['mobileKicker', 'MOBILE KICKER'], ['heroTitle', 'HEADLINE'], ['heroAccent', 'HEADLINE ACCENT'], ['heroText', 'HERO TEXT', '', 'textarea'], ['ctaLabel', 'MAIN BUTTON'], ['secondaryCta', 'SECOND BUTTON']]],
+  ['SECTIONS & FOOTER', [['rotationTitle', 'RING TITLE'], ['productsTitle', 'PRODUCTS HEADING'], ['signupTitle', 'SIGN-UP TITLE'], ['footerWord', 'FOOTER WORDMARK']]],
 ];
 async function viewSite() {
   const s = await req('GET', '/settings');

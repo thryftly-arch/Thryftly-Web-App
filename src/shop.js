@@ -99,10 +99,30 @@ const colorLine = p => {
   const cs = [...new Set(p.sizes.map(z => z.color).filter(Boolean))];
   return cs.length > 1 ? `${cs.length} COLOURS` : cs[0] || p.color;
 };
+// How a category reads on the site (the data keeps the short code).
+const CAT_LABEL = { TEES: 'T-SHIRTS' };
+export const catLabel = c => CAT_LABEL[c] || c;
+
+// Every .countdown[data-target] ticks down to its own date.
+export function startCountdowns() {
+  const pad = n => String(n).padStart(2, '0');
+  const tick = () => $$('.countdown[data-target]').forEach(el => {
+    const t = Math.max(0, Math.floor((Date.parse(el.dataset.target) - Date.now()) / 1000));
+    el.textContent = [Math.floor(t / 86400), Math.floor(t % 86400 / 3600), Math.floor(t % 3600 / 60), t % 60].map(pad).join(':');
+  });
+  tick();
+  setInterval(tick, 1000);
+}
+// A live drop counts down to its opening, or to its end once open.
+export const dropClock = d => {
+  const opens = d.startsAt && Date.parse(d.startsAt) > Date.now();
+  return opens ? { label: 'UNLOCKS IN', target: d.startsAt } : d.endsAt ? { label: 'ENDS IN', target: d.endsAt } : null;
+};
+
 export const productUrl = p => `/product.html?p=${encodeURIComponent(p.slug)}`;
 export function productCard(p, i) {
   const soldOut = !p.sizes.some(z => z.available);
-  const tag = soldOut ? '<span class="tag tag-red">SOLD OUT</span>' : p.badge ? `<span class="tag tag-${p.badgeStyle === 'red' ? 'red' : 'yel'}">${esc(p.badge)}</span>` : '';
+  const tag = p.unlocksAt ? '<span class="tag tag-yel">DROPS SOON</span>' : soldOut ? '<span class="tag tag-red">SOLD OUT</span>' : p.badge ? `<span class="tag tag-${p.badgeStyle === 'red' ? 'red' : 'yel'}">${esc(p.badge)}</span>` : '';
   const img = p.images.front ? `<img src="${esc(p.images.front)}" alt="${esc(p.name)}" loading="lazy" decoding="async">` : '[ product shot ]';
   return `<div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${productUrl(p)}">
     <div class="pimg${p.images.front ? ' has-img' : ''}">${img}${tag}</div>
@@ -123,6 +143,15 @@ export function richText(t) {
 
 /* ---------- settings → page ---------- */
 export function bindSettings(s) {
+  // Header "live" marker only exists while a drop is on.
+  const drop = site?.drops?.[0];
+  $$('.live').forEach(el => {
+    el.hidden = !drop;
+    if (!drop) return;
+    const soon = drop.startsAt && Date.parse(drop.startsAt) > Date.now();
+    el.innerHTML = `<span class="live-dot"></span>${esc(drop.name)} ${soon ? 'SOON' : 'LIVE'}`;
+    el.onclick = () => (location.href = `/#drop-${drop.id}`);
+  });
   $$('[data-s]').forEach(el => { if (s[el.dataset.s] != null) el.textContent = s[el.dataset.s]; });
   $$('[data-social]').forEach(a => {
     const u = s.socials?.[a.dataset.social];

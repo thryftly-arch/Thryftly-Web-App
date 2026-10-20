@@ -51,11 +51,20 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 
 const publicProduct = p => ({
   slug: p.slug, name: p.name, edition: p.edition, price: p.price, category: p.category, badge: p.badge, badgeStyle: p.badgeStyle,
-  tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images, colorImages: p.colorImages || {},
+  tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images, colorImages: p.colorImages || {}, colorBacks: p.colorBacks || {},
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
   sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
+  unlocksAt: lockedUntil(p.id),
 });
 const activeProducts = () => db.products.filter(p => p.active).sort((a, b) => a.sort - b.sort);
+
+// Drops that are switched on and haven't ended. Products in a drop that hasn't opened yet are
+// visible as teasers but can't be bought until it opens.
+const liveDrops = () => db.drops.filter(d => d.active && !(d.endsAt && Date.parse(d.endsAt) < Date.now()));
+const lockedUntil = id => {
+  const d = liveDrops().find(d => d.productIds.includes(id) && d.startsAt && Date.parse(d.startsAt) > Date.now());
+  return d ? d.startsAt : '';
+};
 
 /* ---------------- Razorpay webhook (needs the raw body, so before express.json) ---------------- */
 app.post('/api/webhooks/razorpay', express.raw({ type: '*/*', limit: '1mb' }), wrap(async (req, res) => {
@@ -73,7 +82,9 @@ app.use(express.json({ limit: '12mb' })); // try-on photos come in as base64
 
 /* ---------------- public API ---------------- */
 app.get('/api/site', (req, res) => {
-  res.json({ settings: db.settings, pages: db.pages, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured() });
+  const slugOf = Object.fromEntries(db.products.filter(p => p.active).map(p => [p.id, p.slug]));
+  const drops = liveDrops().map(d => ({ id: d.id, name: d.name, tagline: d.tagline, description: d.description, banner: d.banner, startsAt: d.startsAt, endsAt: d.endsAt, products: d.productIds.map(i => slugOf[i]).filter(Boolean) }));
+  res.json({ settings: db.settings, pages: db.pages, drops, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured() });
 });
 
 app.get('/api/products/:slug', (req, res) => {
@@ -127,6 +138,7 @@ function priceCart(items) {
     const qty = Math.floor(num(it.qty, 1, 5));
     const what = p && s ? `${p.name} (${[s.color, s.label].filter(Boolean).join(' / ')})` : '';
     if (!p || !s) throw new Error('An item in your cart is no longer available');
+    if (lockedUntil(p.id)) throw new Error(`${p.name} isn't out yet — it unlocks with its drop`);
     // Nothing can be printed without the Qikink SKU, so don't take money for it.
     if (I.qikinkConfigured() && !s.sku) throw new Error(`${what} can't be ordered right now`);
     if (s.stock < qty) throw new Error(`${what} is sold out`);
@@ -254,6 +266,25 @@ admin.put('/settings', (req, res) => {
   save(); res.json(db.settings);
 });
 
+/* drops */
+function readDrop(b, prev = {}) {
+  const when = v => { const t = Date.parse(v); return isNaN(t) ? '' : new Date(t).toISOString(); };
+  if (!str(b.name)) throw new Error('Give the drop a name');
+  return {
+    ...prev, name: str(b.name, 40).toUpperCase(), tagline: str(b.tagline, 80).toUpperCase(), description: str(b.description, 600),
+    banner: imgUrl(b.banner), startsAt: when(b.startsAt), endsAt: when(b.endsAt), active: !!b.active,
+    productIds: (Array.isArray(b.productIds) ? b.productIds : []).filter(i => db.products.some(p => p.id === i)).slice(0, 60),
+  };
+}
+admin.get('/drops', (req, res) => res.json(db.drops));
+admin.post('/drops', (req, res) => { try { const d = readDrop(req.body, { id: id() }); db.drops.push(d); save(); res.json(d); } catch (e) { fail(res, 400, e.message); } });
+admin.put('/drops/:id', (req, res) => {
+  const i = db.drops.findIndex(d => d.id === req.params.id);
+  if (i < 0) return fail(res, 404, 'not found');
+  try { db.drops[i] = readDrop(req.body, db.drops[i]); save(); res.json(db.drops[i]); } catch (e) { fail(res, 400, e.message); }
+});
+admin.delete('/drops/:id', (req, res) => { db.drops = db.drops.filter(d => d.id !== req.params.id); save(); res.json({ ok: true }); });
+
 /* pages + inbox */
 admin.get('/pages', (req, res) => res.json(db.pages));
 admin.put('/pages', (req, res) => {
@@ -277,6 +308,7 @@ function readProduct(b, prev = {}) {
     ringLabel: str(b.ringLabel, 40),
     sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 12).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0 })).filter(s => s.label),
     colorImages: Object.fromEntries(Object.entries(b.colorImages || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
+    colorBacks: Object.fromEntries(Object.entries(b.colorBacks || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
     images: Object.fromEntries(['front', 'back', 'detail', 'onBody'].map(k => [k, imgUrl(b.images?.[k])])),
     tryonImage: imgUrl(b.tryonImage),
@@ -385,7 +417,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
   try { rows = I.parseShopifyCsv(String(req.body || '')); } catch (e) { return fail(res, 400, e.message); }
 
   // Download every distinct image, 6 at a time. Failures keep the Shopify URL so nothing is lost.
-  const urls = [...new Set(rows.flatMap(r => [...r.gallery, ...Object.values(r.colorImages)]))];
+  const urls = [...new Set(rows.flatMap(r => [...r.gallery, ...Object.values(r.colorImages), ...Object.values(r.colorBacks)]))];
   const local = {};
   let failed = 0;
   for (let i = 0; i < urls.length; i += 6) {
@@ -404,6 +436,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
     const fields = {
       name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || categoryOf(r.title, r.productCategory)).toUpperCase().slice(0, 40),
       sizes: variants, colorImages: Object.fromEntries(Object.entries(r.colorImages).map(([c, u]) => [c, L(u)])),
+      colorBacks: Object.fromEntries(Object.entries(r.colorBacks).map(([c, u]) => [c, L(u)])),
       images: { front, back, detail, onBody }, shopify: { handle: r.handle, status: r.status },
     };
     if (prev) {

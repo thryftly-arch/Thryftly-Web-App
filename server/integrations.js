@@ -184,6 +184,37 @@ export const htmlToText = h => String(h || '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
   .replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
+// Which back photo belongs to which colour. Qikink mockups are named "<View>_<n>_c_<colourCode>_…"
+// (Front_1_c_2, Back_2_c_2 = same colour); some carry alt text "Color_NavyBlue"; others list
+// each colour's front then its back. Anything still unclear is left out rather than guessed.
+const fileOf = u => decodeURIComponent(String(u).split('?')[0].split('/').pop());
+const qkName = u => /^([A-Za-z]+(?:_[A-Za-z]+)?)_\d+_c_(\d+)[_.]/.exec(fileOf(u));
+const squash = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+function matchBacks(images, colorImages) {
+  const backs = {};
+  const fronts = new Set(Object.values(colorImages));
+  const byCode = {}, byName = {};
+  for (const [c, u] of Object.entries(colorImages)) { const m = qkName(u); if (m) byCode[m[2]] = c; byName[squash(c)] = c; }
+  const rest = images.filter(i => !fronts.has(i.src));
+  for (const i of rest) {
+    const m = qkName(i.src);
+    const alt = /^Color_(.+)$/i.exec(i.alt || '');
+    const color = (m && byCode[m[2]]) || (alt && byName[squash(alt[1])]);
+    const isBack = m ? /^back$/i.test(m[1]) : /back/i.test(fileOf(i.src));
+    if (color && isBack && !backs[color]) backs[color] = i.src;
+  }
+  if (Object.keys(backs).length) return backs;
+  // Interleaved layout: front A, back A, (details A…), front B, back B… with the same count per colour.
+  const groups = []; let cur = null;
+  for (const i of images) {
+    const c = Object.keys(colorImages).find(c => colorImages[c] === i.src);
+    if (c) groups.push((cur = { c, extra: [] })); else if (cur) cur.extra.push(i.src);
+  }
+  const n = new Set(groups.map(g => g.extra.length));
+  if (groups.length > 1 && n.size === 1 && !n.has(0) && images[0] && fronts.has(images[0].src)) for (const g of groups) backs[g.c] = g.extra[0];
+  return backs;
+}
+
 export function parseShopifyCsv(text) {
   const [head, ...rows] = csvRows(text.replace(/^﻿/, ''));
   const ix = Object.fromEntries(head.map((h, i) => [h.trim(), i]));
@@ -223,14 +254,17 @@ export function parseShopifyCsv(text) {
     variants.sort((a, b) => colorOrder.indexOf(a.color) - colorOrder.indexOf(b.color) || rank(a.label) - rank(b.label));
     const colorImages = {};
     for (const v of variants) if (v.color && v.image && !colorImages[v.color]) colorImages[v.color] = v.image;
-    // Gallery = images in position order, minus the mockups that belong to other colours.
+    const colorBacks = matchBacks(p.images.sort((a, b) => a.position - b.position), colorImages);
+    // Gallery = the first colour's shots (front, back, details) or, without colours, everything in order.
     const firstColor = variants.find(v => v.color)?.color;
-    const others = new Set(Object.entries(colorImages).filter(([c]) => c !== firstColor).map(([, u]) => u));
-    const gallery = p.images.sort((a, b) => a.position - b.position).map(i => i.src).filter(u => !others.has(u));
+    const others = new Set(Object.entries({ ...colorImages }).filter(([c]) => c !== firstColor).map(([, u]) => u)
+      .concat(Object.entries(colorBacks).filter(([c]) => c !== firstColor).map(([, u]) => u)));
+    const gallery = p.images.map(i => i.src).filter(u => !others.has(u));
+    if (firstColor && colorBacks[firstColor]) gallery.splice(gallery.indexOf(colorBacks[firstColor]), 1), gallery.splice(1, 0, colorBacks[firstColor]);
     return {
       handle: p.handle, title: p.title, description: p.description, type: p.type, productCategory: p.productCategory || '', status: p.status,
       price: Math.min(...variants.map(v => v.price).filter(Boolean)) || 0,
-      variants, colorImages, gallery,
+      variants, colorImages, colorBacks, gallery,
     };
   });
 }

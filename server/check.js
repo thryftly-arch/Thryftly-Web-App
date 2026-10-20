@@ -54,6 +54,20 @@ assert.equal(cap.status, 'draft');
 const [combo] = I.parseShopifyCsv(`Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Option3 Name,Option3 Value,Variant SKU,Variant Price,Status
 duo,Duo,Tee A (color),Black,Tee A (size),S,Tee B (size),M,qikink-sku-1,1599,active`);
 assert.deepEqual(combo.variants.map(v => [v.color, v.label]), [['BLACK', 'S / M']]);
+// Back photos per colour: Qikink file codes, then interleaved order.
+const backs = I.parseShopifyCsv(`Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Variant SKU,Variant Price,Image Src,Image Position,Variant Image,Status
+t,T,Color,Black,Size,S,a,1,https://x/Front_1_c_2_aa.jpg,1,https://x/Front_1_c_2_aa.jpg,active
+t,,,Navy,,S,b,1,https://x/Front_1_c_3_bb.jpg,2,https://x/Front_1_c_3_bb.jpg,
+t,,,,,,,,https://x/Back_2_c_3_cc.jpg,3,,
+t,,,,,,,,https://x/Back_2_c_2_dd.jpg,4,,`)[0];
+assert.deepEqual(backs.colorBacks, { BLACK: 'https://x/Back_2_c_2_dd.jpg', NAVY: 'https://x/Back_2_c_3_cc.jpg' });
+assert.deepEqual(backs.gallery, ['https://x/Front_1_c_2_aa.jpg', 'https://x/Back_2_c_2_dd.jpg']);
+const inter = I.parseShopifyCsv(`Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Variant SKU,Variant Price,Image Src,Image Position,Variant Image,Status
+u,U,Color,White,Size,S,a,1,https://x/1.png,1,https://x/1.png,active
+u,,,,,,,,https://x/2.png,2,,
+u,,,Black,,S,b,1,https://x/3.png,3,https://x/3.png,
+u,,,,,,,,https://x/4.png,4,,`)[0];
+assert.deepEqual(inter.colorBacks, { WHITE: 'https://x/2.png', BLACK: 'https://x/4.png' });
 console.log('shopify csv checks ok');
 
 // Qikink → WooCommerce receiver: replay a typical push against a throwaway server.
