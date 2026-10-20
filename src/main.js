@@ -311,6 +311,9 @@ if (viewer) {
     speed: 30,
     apply: a => { $('.turntable').style.transform = `rotateY(${a}deg)`; g3d?.setAngle(a); gm?.setAngle(a); },
   });
+  // ?view=front / ?view=back opens the viewer standing still on that side (handy for sharing).
+  const view = new URLSearchParams(location.search).get('view');
+  if (view === 'front' || view === 'back') { tt.paused = true; tt.auto = view === 'back' ? 180 : 0; }
   const photo = $('.viewer-photo');
   $$('.thumb').forEach(b => b.addEventListener('click', () => {
     $$('.thumb').forEach(x => x.classList.toggle('on', x === b));

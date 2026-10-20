@@ -2,8 +2,8 @@
 // product's own fabric colour and print, taken automatically from its flat mockup photos:
 //   - fabric colour = median colour of the garment in the mockup
 //   - print = the pixels that clearly differ from that fabric (in hue, or strongly in brightness),
-//     cut out with soft alpha, then projected onto the chest/back of the model, scaled from the
-//     torso width so it sits where it does on the real piece.
+//     cut out with soft alpha, then projected onto the chest/back of the model, placed by
+//     matching shoulder line, hem and centre line between the photo and the model.
 // Admins can upload the original print file to replace the automatic cut-out.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -15,18 +15,34 @@ import { silhouette, distance, loadImg } from './garment3d.js';
 const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
 const median = a => a.sort((p, q) => p - q)[a.length >> 1];
 
-// Torso width + centre and the hem line (in the photo), used to place the print on the model.
-function torsoOf({ mask, w, box }) {
-  const { x0, y0, x1, y1 } = box, bh = y1 - y0 + 1, cx = Math.round((x0 + x1) / 2);
-  const widths = [], centres = [];
+// Landmarks measured the same way on the mockup and on the model's front silhouette, so a print
+// can be carried from one to the other:
+//   centre   - middle of the body (median centre of the rows above the hem)
+//   shoulder - shoulder line, the top of the garment either side of the neck (clear of a hood)
+//   hem      - bottom of the body down the centre line (hanging sleeves don't count)
+export function landmarks({ mask, w, box }) {
+  const { x0, y0, x1, y1 } = box, bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+  const mid = Math.round((x0 + x1) / 2), centres = [];
   for (let y = Math.round(y0 + bh * 0.62); y <= y0 + bh * 0.9; y++) {
-    if (!mask[y * w + cx]) continue;
-    let a = cx, b = cx;
+    if (!mask[y * w + mid]) continue;
+    let a = mid, b = mid;
     while (a > 0 && mask[y * w + a - 1]) a--;
     while (b < w - 1 && mask[y * w + b + 1]) b++;
-    widths.push(b - a + 1); centres.push((a + b) / 2);
+    centres.push((a + b) / 2);
   }
-  return { width: widths.length ? median(widths) : (x1 - x0) * 0.6, centre: centres.length ? median(centres) : cx, hem: y1 };
+  const centre = centres.length ? median(centres) : mid;
+  const c = Math.round(centre);
+  let hem = Math.round(y0 + bh / 2);
+  while (hem + 1 <= y1 && mask[(hem + 1) * w + c]) hem++;
+  const tops = [];
+  for (const side of [-1, 1]) {
+    for (let k = 0.2; k <= 0.26; k += 0.01) {
+      const x = Math.round(centre + side * k * bw);
+      for (let y = y0; y <= hem; y++) if (mask[y * w + x]) { tops.push(y); break; }
+    }
+  }
+  const shoulder = tops.length ? median(tops) : y0;
+  return { centre, shoulder, hem };
 }
 
 const cache = new Map();
@@ -78,7 +94,14 @@ export async function analysePhoto(url) {
       // Skip blobs that hug the outline: that's the photo's edge halo/shadow, not print.
       if (px_.length >= area * 0.0004 && depth / px_.length > 14) blobs.push({ px: px_, x0: bx0, y0: by0, x1: bx1, y1: by1 });
     }
-    const torso = torsoOf(sil);
+    const torso = { ...landmarks(sil), width: 0 };
+    { // chest width, for judging how central a print blob is
+      const c = Math.round(torso.centre), y = Math.round((torso.shoulder + torso.hem) * 0.5);
+      let a = c, b = c;
+      while (a > 0 && mask[y * w + a - 1]) a--;
+      while (b < w - 1 && mask[y * w + b + 1]) b++;
+      torso.width = b - a + 1;
+    }
     const result = { fabric: new THREE.Color().setRGB(fabric[0] / 255, fabric[1] / 255, fabric[2] / 255, THREE.SRGBColorSpace), torso, print: null };
     if (!blobs.length) return result; // plain garment
     // Rank by size and by how central the blob sits on the torso: prints live on the chest/back,
@@ -141,15 +164,43 @@ const loadModel = type => (models[type] ||= loader.loadAsync(`/models/${type}.gl
   let geo = null;
   g.scene.traverse(o => { if (o.isMesh && !geo) geo = o.geometry; });
   geo.computeBoundingBox();
-  // Torso width on the model, measured just above the hem like on the photo.
-  const p = geo.attributes.position, bb = geo.boundingBox, H = bb.max.y - bb.min.y;
-  let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i), z = p.getZ(i);
-    if (y > bb.min.y + H * 0.12 && y < bb.min.y + H * 0.3 && Math.abs(z) < 0.5) { lo = Math.min(lo, p.getX(i)); hi = Math.max(hi, p.getX(i)); }
-  }
-  return { geo, torsoW: hi - lo, torsoC: (hi + lo) / 2, hemY: bb.min.y };
+  return { geo };
 }));
+
+// The model's front silhouette, rendered flat (orthographic) at a known scale, so its landmarks
+// can be measured exactly like the mockup's. Pixel (x, y) -> world via `toWorld`.
+function measureModel(renderer, model) {
+  if (model.marks) return model;
+  const bb = model.geo.boundingBox, sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y;
+  const W = 320, H = Math.round(W * sy / sx);
+  const target = new THREE.WebGLRenderTarget(W, H);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.Mesh(model.geo, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })));
+  const cam = new THREE.OrthographicCamera(bb.min.x, bb.max.x, bb.max.y, bb.min.y, -10, 10);
+  cam.position.z = 5;
+  const prevTarget = renderer.getRenderTarget(), prevClear = renderer.getClearAlpha();
+  renderer.setRenderTarget(target);
+  renderer.setClearColor(0x000000, 1);
+  renderer.clear();
+  renderer.render(scene, cam);
+  const buf = new Uint8Array(W * H * 4);
+  renderer.readRenderTargetPixels(target, 0, 0, W, H, buf);
+  renderer.setRenderTarget(prevTarget);
+  renderer.setClearColor(0x000000, prevClear);
+  target.dispose();
+  // GL rows run bottom-up; flip into image order like the photo mask.
+  const mask = new Uint8Array(W * H);
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (buf[((H - 1 - y) * W + x) * 4] < 128) continue;
+    mask[y * W + x] = 1;
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  model.marks = landmarks({ mask, w: W, box: { x0, y0, x1, y1 } });
+  model.toWorld = (x, y) => [bb.min.x + (x + 0.5) / W * sx, bb.max.y - (y + 0.5) / H * sy];
+  model.unit = sx / W;
+  return model;
+}
 
 // Which model a product uses: admin override, else its category / name.
 export function modelFor(product) {
@@ -210,13 +261,15 @@ const printTexture = canvas => {
   return t;
 };
 
-// Where a print from the photo lands on the model: same offset from the torso centre and hem,
-// scaled by torso width.
-function rectFor(print, photo, model) {
-  const s = model.torsoW / photo.torso.width;
-  const cx = ((print.x0 + print.x1) / 2 - photo.torso.centre) * s + model.torsoC;
-  const cy = model.hemY + (photo.torso.hem - (print.y0 + print.y1) / 2) * s;
-  return new THREE.Vector4(cx, cy, (print.x1 - print.x0) * s, (print.y1 - print.y0) * s);
+// Where a print from the photo lands on the model: the photo's shoulder-to-hem span is mapped onto
+// the model's, so the print keeps its height on the body, its offset from the centre line and its
+// size relative to the garment. A back photo is seen from behind, so its left/right flips.
+function rectFor(print, photo, model, back) {
+  const p = photo.torso, m = model.marks;
+  const s = (m.hem - m.shoulder) / (p.hem - p.shoulder); // photo px -> model silhouette px
+  const dx = ((print.x0 + print.x1) / 2 - p.centre) * s * (back ? -1 : 1);
+  const [cx, cy] = model.toWorld(m.centre + dx, m.shoulder + ((print.y0 + print.y1) / 2 - p.shoulder) * s);
+  return new THREE.Vector4(cx, cy, (print.x1 - print.x0) * s * model.unit, (print.y1 - print.y0) * s * model.unit);
 }
 
 export async function mountModel(host) {
@@ -292,7 +345,7 @@ export async function mountModel(host) {
     if (!f) return false;
     mesh.geometry = model.geo;
     width = model.geo.boundingBox.max.x - model.geo.boundingBox.min.x;
-    ground.position.y = model.hemY - 0.02;
+    ground.position.y = model.geo.boundingBox.min.y - 0.02;
     material.color.copy(f.fabric);
     // Sheen in the fabric's own tint: a white sheen would put a grey haze over dark colours.
     material.sheenColor.copy(f.fabric).multiplyScalar(1.4);
@@ -308,7 +361,7 @@ export async function mountModel(host) {
       }
       if (!print) continue;
       u[side + 'Map'].value = printTexture(print.canvas);
-      u[side + 'Rect'].value = rectFor(print, photo, model);
+      u[side + 'Rect'].value = rectFor(print, photo, measureModel(renderer, model), side === 'back');
       u['has' + key].value = 1;
     }
     resize();

@@ -49,6 +49,20 @@ for job in jobs:
     c = (lo + hi) / 2
     for v in me.vertices:
         v.co = (v.co - c) * s
+    # Square the garment up: the widest horizontal direction (the shoulder line, sleeve to sleeve)
+    # should run along X so the front faces the camera. Principal axis of the X/Y spread, turned
+    # by the smallest angle that lines it up.
+    import math
+    xs = [v.co.x for v in me.vertices]; ys = [v.co.y for v in me.vertices]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxx = sum((x - mx) ** 2 for x in xs); syy = sum((y - my) ** 2 for y in ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    ang = 0.5 * math.atan2(2 * sxy, sxx - syy)  # direction of greatest spread
+    if abs(ang) > math.pi / 2: ang -= math.copysign(math.pi, ang)
+    rot = mathutils.Matrix.Rotation(-ang, 4, 'Z')
+    for v in me.vertices:
+        v.co = rot @ v.co
+    print('ROTATED', name, round(math.degrees(-ang), 1), 'deg')
 
     # Weld the duplicate vertices CLO/Marvelous exports leave along seams FIRST: decimating an
     # unwelded mesh tears it apart. Then make every face point outward.
