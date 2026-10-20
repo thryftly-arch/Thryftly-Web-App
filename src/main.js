@@ -235,8 +235,17 @@ if (ringEl) {
   const list = site.products.filter(p => p.inRotation);
   const n = list.length;
   const step = 360 / Math.max(n, 1);
-  const r = Math.max(440, Math.round(n * 300 / (2 * Math.PI)));
-  ringEl.style.setProperty('--r', r + 'px');
+  // Radius from the actual card width (bigger on desktop than on phones): wide enough that
+  // neighbours don't overlap, and the whole ring is pulled back by it so the front card sits at
+  // its true size.
+  let r = 0;
+  const sizeRing = () => {
+    const w = ringEl.offsetWidth || 330;
+    r = Math.max(w * 1.7, Math.round(n * (w + 50) / (2 * Math.PI)));
+    ringEl.style.setProperty('--r', r + 'px');
+  };
+  sizeRing();
+  addEventListener('resize', sizeRing);
   const colours = p => new Set(p.sizes.map(z => z.color).filter(Boolean)).size;
   ringEl.innerHTML = list.map((p, i) => `
     <a class="ring-card" href="${url(p)}" style="--a:${step * i}deg" draggable="false" aria-label="${esc(p.name)}">

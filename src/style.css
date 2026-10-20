@@ -88,9 +88,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .sec-head { padding: 96px var(--gut) 40px; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
 .sec-h2 { font-stretch: 125%; font-weight: 900; font-style: italic; font-size: 64px; line-height: .95; letter-spacing: -.02em; }
 .sec-meta { font: 600 12px var(--mono); letter-spacing: .14em; color: rgba(255,255,255,.6); }
-.ring-stage { height: 640px; perspective: 1400px; display: flex; justify-content: center; align-items: center; cursor: grab; touch-action: pan-y; user-select: none; }
+.ring-stage { height: 540px; perspective: 1600px; display: flex; justify-content: center; align-items: center; cursor: grab; touch-action: pan-y; user-select: none; }
 .ring-stage.dragging { cursor: grabbing; }
-.ring { position: relative; width: 240px; height: 330px; transform-style: preserve-3d; transform: rotateX(-8deg); }
+.ring { position: relative; width: 330px; height: 450px; transform-style: preserve-3d; transform: rotateX(-8deg); }
 .ring-card { position: absolute; inset: 0; transform: rotateY(var(--a)) translateZ(var(--r, 420px)); background: #141416; border: 2px solid; display: flex; flex-direction: column; padding: 12px; gap: 10px; -webkit-user-drag: none; }
 .b-yel { border-color: var(--yel); }
 .b-red { border-color: var(--red); }
@@ -260,9 +260,11 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ring-card .ring-t { padding: 10px 12px; background: #141416; }
 .ring-card.front { border-color: var(--yel); box-shadow: 0 0 0 2px #000, 10px 10px 0 var(--red), 0 30px 80px rgba(255,59,59,.35); }
 .ring-card:not(.front) { border-color: rgba(255,255,255,.18); }
-.ring-floor { position: absolute; left: 50%; bottom: 26px; width: min(760px, 90%); height: 120px; transform: translateX(-50%); border-radius: 50%; border: 2px solid var(--red); box-shadow: 0 0 70px rgba(255,59,59,.4), inset 0 0 50px rgba(255,59,59,.25); pointer-events: none; }
+.ring-floor { position: absolute; left: 50%; bottom: 6px; width: min(900px, 92%); height: 120px; transform: translateX(-50%); border-radius: 50%; border: 2px solid var(--red); box-shadow: 0 0 70px rgba(255,59,59,.4), inset 0 0 50px rgba(255,59,59,.25); pointer-events: none; }
 .ring-floor::after { content: ''; position: absolute; inset: 22px 18%; border-radius: 50%; border: 1px dashed rgba(255,216,77,.6); }
-.ring-ui { display: flex; align-items: center; justify-content: center; gap: 28px; padding: 8px var(--gut) 72px; }
+.ring-ui { display: flex; align-items: center; justify-content: center; gap: 28px; padding: 18px var(--gut) 72px; }
+/* The ring sits right under its heading. */
+.rotation .sec-head { padding-bottom: 0; }
 .ring-btn { width: 56px; height: 56px; border: 2px solid rgba(255,255,255,.35); font: 800 20px var(--mono); transition: border-color .15s, background .15s, color .15s; }
 .ring-btn:hover { border-color: var(--yel); background: var(--yel); color: #000; }
 .ring-info { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 280px; text-align: center; }
@@ -441,9 +443,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   .marquee-track { font-size: 20px; }
   .sec-head { padding-top: 64px; flex-direction: column; align-items: flex-start; }
   .sec-h2 { font-size: 40px; }
-  .ring-stage { height: 480px; }
-  .ring { width: 170px; height: 234px; }
-  .ring-card { transform: rotateY(var(--a)) translateZ(calc(var(--r, 420px) * .62)); }
+  .ring-stage { height: 440px; }
+  .ring { width: 236px; height: 322px; }
   .grid { gap: 20px; padding-bottom: 64px; }
   .pimg { height: 220px; }
   .signup-h { font-size: 30px; }
