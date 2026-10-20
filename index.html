@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THRYFTLY — Drop 07</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">
+      <svg class="brand-bolt d-only" viewBox="-4 -4 112 172" aria-hidden="true"><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" transform="translate(8 8)" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FF3B3B" stroke="#000" stroke-width="6" stroke-linejoin="round"/></svg>
+      <span class="wordmark">THRYFTLY</span>
+    </a>
+    <nav class="nav-links" id="nav-links">
+      <a href="/" class="on">DROPS</a><a href="#shop">SHOP</a><a href="#rotation">ARCHIVE</a><a href="#rotation">LAB</a>
+    </nav>
+    <div class="nav-right d-only">
+      <span class="live"><span class="live-dot"></span><span data-s="liveLabel">DROP 07 LIVE</span></span>
+      <a class="cart-btn" href="/checkout.html">CART [<span class="cart-count">2</span>]</a>
+    </div>
+    <div class="nav-mobile m-only">
+      <a class="cart-sq" href="/checkout.html" aria-label="Cart"><span class="cart-count">2</span></a>
+      <button class="burger" aria-label="Menu" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-floor"></div>
+      <div class="hero-outline">THRYFTLY</div>
+
+      <div class="hero-copy d-only">
+        <span class="kicker" data-s="kicker">DROP 07 // STATIC SEASON // 300 UNITS</span>
+        <h1 class="hero-h1"><span data-s="heroTitle">WEAR THE</span> <span class="volt" data-s="heroAccent">VOLTAGE.</span></h1>
+        <p class="hero-p" data-s="heroText">Rescued vintage, reworked by hand and charged for the street. Every piece is a one-off. When it's gone, it's archived.</p>
+        <div class="hero-ctas">
+          <a class="btn-red" href="#shop" data-s="ctaLabel">SHOP DROP 07 →</a>
+          <a class="btn-ghost" href="#rotation" data-s="secondaryCta">VIEW LOOKBOOK</a>
+        </div>
+        <div class="countdown-block">
+          <span class="countdown-label" data-s="countdownLabel">NEXT DROP UNLOCKS IN</span>
+          <span class="countdown countdown-lg">00:00:00:00</span>
+        </div>
+      </div>
+
+      <span class="m-kicker m-only" data-s="mobileKicker">DROP 07 // LIVE</span>
+      <div class="hero-stage"><div class="stage-inner">
+        <div class="stage-ring d-only"></div>
+        <div class="stage-ring-dash d-only"></div>
+        <i class="corner tl d-only"></i><i class="corner tr d-only"></i><i class="corner bl d-only"></i><i class="corner br d-only"></i>
+        <span class="stage-spec d-only">OBJ: BOLT_07<br>ROT: 360°/8S<br>DEPTH: 24MM<br><span class="red">● CHARGED</span></span>
+        <div class="bolt-float">
+          <div class="bolt3d spin" data-depth="24"></div>
+        </div>
+      </div></div>
+    </section>
+
+    <div class="m-hero-copy m-only">
+      <h1 class="hero-h1"><span data-s="heroTitle">WEAR THE</span> <span class="volt" data-s="heroAccent">VOLTAGE.</span></h1>
+      <div class="m-countdown"><span>NEXT DROP</span><span class="countdown">00:00:00:00</span></div>
+      <a class="btn-red" href="#shop" data-s="ctaLabel">SHOP DROP 07 →</a>
+    </div>
+    <div class="m-strip m-only"></div>
+
+    <div class="marquee">
+      <div class="marquee-track"></div>
+    </div>
+
+    <section class="rotation" id="rotation">
+      <div class="sec-head">
+        <h2 class="sec-h2" data-s="rotationTitle">THE ROTATION</h2>
+        <span class="sec-meta"><span class="ring-count">06</span> PIECES · DRAG TO SPIN</span>
+      </div>
+      <div class="ring-stage">
+        <div class="ring"></div>
+      </div>
+    </section>
+
+    <section class="grid" id="shop"></section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-top">
+      <form class="signup">
+        <span class="signup-h" data-s="signupTitle">GET THE DROP ALERT.</span>
+        <div class="signup-box">
+          <input type="email" placeholder="your@email.com" aria-label="Email" required>
+          <button type="submit">SUBSCRIBE</button>
+        </div>
+      </form>
+      <div class="footer-cols">
+        <div><a href="#shop">SHOP</a><a href="/">DROPS</a><a href="#rotation">ARCHIVE</a></div>
+        <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="tiktok" target="_blank" rel="noopener">TIKTOK</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
+        <div><a href="#">SHIPPING</a><a href="#">RETURNS</a><a href="#">CONTACT</a></div>
+      </div>
+    </div>
+    <div class="footer-word-wrap"><div class="footer-word" data-s="footerWord">THRYFTLY</div></div>
+  </footer>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

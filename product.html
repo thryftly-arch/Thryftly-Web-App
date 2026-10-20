@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THRYFTLY</title>
+  <meta name="description" content="One-off reworked vintage, charged for the street.">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">
+      <svg class="brand-bolt" viewBox="-4 -4 112 172" aria-hidden="true"><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" transform="translate(8 8)" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FF3B3B" stroke="#000" stroke-width="6" stroke-linejoin="round"/></svg>
+      <span class="wordmark">THRYFTLY</span>
+    </a>
+    <span class="crumbs d-only"><a href="/#shop">SHOP</a> / <a href="/" data-s="dropLabel">DROP 07</a> / <span class="p-category"></span> / <span class="yel p-name"></span></span>
+    <a class="cart-btn" href="/checkout.html">CART [<span class="cart-count">0</span>]</a>
+  </header>
+
+  <main class="pdp">
+    <section class="viewer">
+      <div class="viewer-dots"></div>
+      <span class="viewer-tl">360° VIEWER<br><span class="red">● ROTATING</span></span>
+      <span class="viewer-tr">DRAG · PINCH TO ZOOM</span>
+      <div class="viewer-ring"></div>
+      <div class="viewer-ring-dash"></div>
+      <div class="turntable-stage">
+        <div class="turntable">
+          <div class="tt-face tt-front"><span class="tt-ph"></span></div>
+          <div class="tt-face tt-back"><span class="tt-ph"></span></div>
+        </div>
+      </div>
+      <div class="thumbs">
+        <button class="thumb on" data-angle="0" data-img="front">FRONT</button>
+        <button class="thumb" data-angle="180" data-img="back">BACK</button>
+        <button class="thumb" data-angle="0" data-img="detail">DETAIL</button>
+        <button class="thumb" data-angle="0" data-img="onBody">ON BODY</button>
+      </div>
+    </section>
+
+    <section class="details">
+      <div class="badges"><span class="tag p-badge"></span><span class="badge-ghost p-tag"></span></div>
+      <h1 class="pdp-h1"><span class="p-h1a"></span><br><span class="p-h1b"></span> <span class="pdp-num p-edition"></span></h1>
+      <div class="price"><span class="price-main p-price"></span><span class="price-sub p-split"></span></div>
+      <p class="pdp-p p-desc"></p>
+      <div class="sizes">
+        <span class="sizes-label">SIZE — <span class="p-fit"></span></span>
+        <div class="sizes-row"></div>
+      </div>
+      <div class="buy">
+        <button class="btn-red add-cart">ADD TO CART →</button>
+        <button class="fav" aria-label="Save" aria-pressed="false">♡</button>
+      </div>
+      <button class="btn-ghost tryon-open">AI TRY-ON ⚡</button>
+      <div class="specs"></div>
+    </section>
+  </main>
+
+  <dialog class="tryon" aria-label="AI try-on">
+    <div class="tryon-head">
+      <span class="tryon-title">AI TRY-ON // <span class="p-name"></span></span>
+      <button class="tryon-close" aria-label="Close">✕</button>
+    </div>
+    <div class="tryon-body">
+      <div class="tryon-canvas-wrap">
+        <canvas class="tryon-canvas" width="720" height="960"></canvas>
+        <label class="tryon-drop">
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          <span>UPLOAD A FRONT-FACING PHOTO</span>
+          <span class="tryon-hint">Stand straight, full upper body in frame. Your photo stays on this device unless you ask the stylist.</span>
+        </label>
+      </div>
+      <div class="tryon-side">
+        <span class="sizes-label">DRAG THE PIECE ONTO YOUR BODY</span>
+        <label class="tryon-range">SIZE <input type="range" class="tr-scale" min="20" max="200" value="80"></label>
+        <label class="tryon-range">ROTATE <input type="range" class="tr-rot" min="-30" max="30" value="0"></label>
+        <label class="tryon-range">BLEND <input type="range" class="tr-alpha" min="40" max="100" value="92"></label>
+        <div class="tryon-actions">
+          <button class="btn-red tr-ask">ASK THE AI STYLIST →</button>
+          <button class="btn-ghost tr-new">NEW PHOTO</button>
+          <button class="btn-ghost tr-save">SAVE IMAGE</button>
+        </div>
+        <div class="tryon-out" aria-live="polite"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin — THRYFTLY</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+  <link rel="stylesheet" href="/src/admin.css">
+</head>
+<body class="adm">
+  <form class="adm-login" hidden>
+    <span class="wordmark">THRYFTLY</span>
+    <span class="adm-sub">ADMIN</span>
+    <input type="password" name="password" placeholder="Admin password" autocomplete="current-password" required>
+    <button class="btn-red">SIGN IN →</button>
+    <p class="adm-msg"></p>
+  </form>
+
+  <div class="adm-app" hidden>
+    <header class="nav">
+      <a class="brand" href="/" target="_blank"><span class="wordmark">THRYFTLY</span><span class="adm-sub">ADMIN</span></a>
+      <nav class="adm-tabs">
+        <button data-tab="products" class="on">PRODUCTS</button>
+        <button data-tab="site">SITE CONTENT</button>
+        <button data-tab="orders">ORDERS</button>
+        <button data-tab="subscribers">SUBSCRIBERS</button>
+      </nav>
+      <div class="adm-status"></div>
+      <button class="btn-ghost adm-logout">SIGN OUT</button>
+    </header>
+    <main class="adm-main"></main>
+  </div>
+  <div class="adm-toast" aria-live="polite"></div>
+
+  <script type="module" src="/src/admin.js"></script>
+</body>
+</html>

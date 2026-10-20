@@ -1,0 +1,28 @@
+{
+  "name": "thryftly",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"node --watch server/index.js\" vite",
+    "dev:api": "node --watch server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "check": "node server/check.js"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "gsap": "^3.12.5",
+    "helmet": "^8.3.0",
+    "multer": "^2.4.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5",
+    "vite": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.12"
+  }
+}
