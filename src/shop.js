@@ -36,7 +36,24 @@ export function addToCart(slug, size, color = '') {
 export function updateCartCount() {
   const n = getCart().reduce((t, i) => t + i.qty, 0);
   $$('.cart-count').forEach(c => (c.textContent = n));
+  $$('.saved-count').forEach(c => (c.textContent = getSaved().length));
 }
+
+/* ---------- wishlist + recently viewed (this device only) ---------- */
+const read = k => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
+const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
+export const getSaved = () => read('thryftly_saved');
+export const isSaved = slug => getSaved().includes(slug);
+export function toggleSaved(slug) {
+  const list = getSaved(), on = !list.includes(slug);
+  write('thryftly_saved', on ? [slug, ...list] : list.filter(s => s !== slug));
+  $$(`.pheart[data-slug="${CSS.escape(slug)}"]`).forEach(b => { b.setAttribute('aria-pressed', on); b.textContent = on ? '♥' : '♡'; });
+  updateCartCount();
+  window.dispatchEvent(new CustomEvent('thryftly:saved'));
+  return on;
+}
+export const getViewed = () => read('thryftly_viewed');
+export const noteViewed = slug => write('thryftly_viewed', [slug, ...getViewed().filter(s => s !== slug)].slice(0, 12));
 
 /* ---------- shared header + footer (every page) ---------- */
 const BOLT = '<path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" transform="translate(8 8)" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/><path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FF3B3B" stroke="#000" stroke-width="6" stroke-linejoin="round"/>';
@@ -50,10 +67,12 @@ export function mountChrome() {
     <nav class="nav-links" id="nav-links">${NAV.map(([h, l]) => `<a href="${h}"${h.replace('.html', '') === here ? ' class="on" aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
     <div class="nav-right d-only">
       <span class="live"><span class="live-dot"></span><span data-s="liveLabel"></span></span>
-      <a class="cart-btn" href="/checkout.html">CART [<span class="cart-count">0</span>]</a>
+      <a class="saved-btn" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡ <span class="saved-count">0</span></a>
+      <a class="cart-btn" href="/checkout.html" data-drawer="cart">CART [<span class="cart-count">0</span>]</a>
     </div>
     <div class="nav-mobile m-only">
-      <a class="cart-sq" href="/checkout.html" aria-label="Cart"><span class="cart-count">0</span></a>
+      <a class="cart-sq saved-sq" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡</a>
+      <a class="cart-sq" href="/checkout.html" data-drawer="cart" aria-label="Cart"><span class="cart-count">0</span></a>
       <button class="burger" aria-label="Menu" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
     </div>`;
   const footer = $('footer[data-chrome]');
@@ -92,6 +111,8 @@ export function mountChrome() {
     }
     btn.disabled = false;
   });
+  // Cart drawer, quick add, page transitions and the cursor ring: loaded once the header exists.
+  import('./extras.js').then(m => m.init());
 }
 
 /* ---------- product card (home grid + shop page) ---------- */
@@ -134,8 +155,12 @@ export function productCard(p, i) {
       <div class="pslides">${slides.map((s, k) => `<img src="${esc(s.src)}" alt="${esc(p.name)}${s.c ? ' — ' + esc(s.c) : ''}" data-c="${esc(s.c)}" ${k ? 'loading="lazy"' : 'loading="lazy" decoding="async"'} draggable="false">`).join('')}</div>
       ${slides.length > 1 ? `<button class="pnav pprev" type="button" aria-label="Previous colour" tabindex="-1">‹</button><button class="pnav pnext" type="button" aria-label="Next colour" tabindex="-1">›</button>
       <div class="pdots">${slides.map((_, k) => `<i${k ? '' : ' class="on"'}></i>`).join('')}</div><span class="pcolour">${esc(slides[0].c)}</span>` : ''}`;
+  const saved = isSaved(p.slug);
+  const buyable = !soldOut && !p.unlocksAt;
   return `<div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${productUrl(p)}">
-    <div class="pimg${slides.length ? ' has-img' : ''}">${media}${tag}</div>
+    <div class="pimg${slides.length ? ' has-img' : ''}">${media}${tag}
+      <button class="pheart" type="button" data-slug="${esc(p.slug)}" aria-pressed="${saved}" aria-label="Save ${esc(p.name)}">${saved ? '♥' : '♡'}</button>
+      ${buyable ? `<button class="pquick" type="button" data-slug="${esc(p.slug)}">+ QUICK ADD</button>` : ''}</div>
     <div class="pinfo"><span class="pname">${esc(p.name)}${p.edition ? ' ' + esc(p.edition.replace('/', '/ ')) : ''}</span>
     <div class="pmeta"><span>${esc([sizeRange(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${money(p.price)}</span></div></div>
   </a></div>`;

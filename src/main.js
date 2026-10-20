@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -170,20 +170,25 @@ if (isProduct) {
   }
   drawVariants();
 
-  add.addEventListener('click', () => {
-    if (add.dataset.added) return void (location.href = '/checkout.html');
+  add.addEventListener('click', async () => {
     addToCart(p.slug, size, color);
-    add.textContent = 'ADDED — VIEW CART →';
-    add.dataset.added = '1';
     gsap.fromTo('.cart-btn', { rotationY: 0 }, { rotationY: 360, transformPerspective: 400, duration: 0.6, ease: 'power2.out' });
+    (await import('./extras.js')).pulse();
+    window.dispatchEvent(new CustomEvent('thryftly:drawer', { detail: 'cart' }));
   });
 
 
-  $('.fav').addEventListener('click', e => {
-    const on = e.currentTarget.getAttribute('aria-pressed') !== 'true';
-    e.currentTarget.setAttribute('aria-pressed', on);
-    e.currentTarget.textContent = on ? '♥' : '♡';
-  });
+  // ♡ saves to the wishlist (shared with the cards and the drawer's SAVED tab).
+  const fav = $('.fav');
+  const showFav = () => { const on = isSaved(p.slug); fav.setAttribute('aria-pressed', on); fav.textContent = on ? '♥' : '♡'; };
+  showFav();
+  fav.addEventListener('click', () => { toggleSaved(p.slug); showFav(); });
+  window.addEventListener('thryftly:saved', showFav);
+
+  // Recently viewed: what this shopper looked at before (this device), newest first.
+  const seen = getViewed().filter(s => s !== p.slug).map(s => site.products.find(o => o.slug === s)).filter(Boolean).slice(0, 4);
+  noteViewed(p.slug);
+  if (seen.length) { $('.viewed-grid').innerHTML = seen.map(productCard).join(''); $('.viewed').hidden = false; }
 
   $('.p-cat-link').href = `/shop.html?c=${encodeURIComponent(p.category)}`;
   const related = site.products.filter(o => o.slug !== p.slug && o.category === p.category).slice(0, 4);
