@@ -50,6 +50,12 @@ const SEED = () => ({
     signupTitle: 'BE FIRST TO KNOW.',
     footerWord: 'THRYFTLY',
     socials: { instagram: '', tiktok: '', discord: '' },
+    // Emails: a code in the welcome emails (account + drop list) and in abandoned-cart reminders. Create it under Discounts.
+    welcomeCode: '',
+    reminderCode: '',
+    // Analytics: GA4 measurement ID (G-…) and Meta Pixel ID. Empty = not loaded.
+    ga4Id: '',
+    metaPixelId: '',
     contact: { email: '', phone: '', whatsapp: '', address: '', hours: '' },
   },
   // Long-form pages, edited in Admin → Pages. Plain text: blank line = paragraph, "- " = list, "# " = heading.
@@ -90,6 +96,8 @@ function migrate() {
   db.pages = { ...seed.pages, ...db.pages };
   db.messages ??= [];
   db.drops ??= [];
+  db.discounts ??= [];
+  db.sizeCharts ??= [];
   // Copy that only made sense for the mockup's "Drop 07": swap it for the new defaults, but only
   // where it was never edited (still exactly the old text).
   const OLD = { liveLabel: 'DROP 07 LIVE', kicker: 'DROP 07 // STATIC SEASON // 300 UNITS', mobileKicker: 'DROP 07 // LIVE', ctaLabel: 'SHOP DROP 07 →', secondaryCta: 'VIEW LOOKBOOK', rotationTitle: 'THE ROTATION', signupTitle: 'GET THE DROP ALERT.' };
@@ -98,7 +106,7 @@ function migrate() {
 }
 
 export const db = {};
-const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers'];
+const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers', 'discounts', 'sizeCharts'];
 const DOCS = ['settings', 'pages', 'importedImages', 'woo'];
 const rowId = (coll, r) => String(coll === 'subscribers' ? r.email : r.id);
 
@@ -136,8 +144,8 @@ export async function load(maxAge = 0) {
   if (!remote || (maxAge && Date.now() - loadedAt < maxAge)) return;
   const rows = [];
   for (let off = 0; ; off += 1000) {
-    // Skipped: per-customer wishlists (read one at a time) and the import bookkeeping (read when importing).
-    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}&coll=neq.wishlists&not.and=(coll.eq.doc,id.eq.importedImages)`)).json();
+    // Skipped: per-customer rows (wishlists, customers: read one at a time) and the import bookkeeping (read when importing).
+    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}&coll=not.in.(wishlists,customers)&not.and=(coll.eq.doc,id.eq.importedImages)`)).json();
     rows.push(...page);
     if (page.length < 1000) break;
   }
@@ -220,6 +228,19 @@ export async function authUser(token) {
   if (users.size > 500) users.clear();
   users.set(token, { user, until: Date.now() + 60e3 });
   return user;
+}
+
+// Customer accounts, for Admin → Customers.
+export async function listUsers() {
+  if (!remote) return [];
+  const out = [];
+  for (let page = 1; page < 50; page++) {
+    const j = await (await sb(`/auth/v1/admin/users?page=${page}&per_page=1000`)).json();
+    const users = j.users || [];
+    out.push(...users);
+    if (users.length < 1000) return out;
+  }
+  return out;
 }
 
 /* ---------- images ---------- */

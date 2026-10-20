@@ -81,6 +81,18 @@ export async function razorpayCreateOrder({ amount, currency, receipt }) {
   return j;
 }
 
+// Full or part refund of a captured payment. amount in rupees.
+export async function razorpayRefund(paymentId, amount) {
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+    method: 'POST',
+    headers: { Authorization: 'Basic ' + Buffer.from(env('RAZORPAY_KEY_ID') + ':' + env('RAZORPAY_KEY_SECRET')).toString('base64'), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount: Math.round(amount * 100), speed: 'normal' }),
+  });
+  const j = await res.json();
+  if (!res.ok) throw new Error('Razorpay: ' + (j.error?.description || res.status));
+  return j;
+}
+
 const hmac = (secret, data) => crypto.createHmac('sha256', secret).update(data).digest('hex');
 const safeEq = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -130,7 +142,7 @@ export async function ollamaStylist({ imageBase64, product }) {
 }
 
 /* ---------------- Qikink dashboard CSV ("My Products" export) ---------------- */
-function csvRows(text) {
+export function csvRows(text) {
   const rows = []; let row = [], cell = '', q = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -220,6 +232,8 @@ export function parseShopifyCsv(text) {
   const ix = Object.fromEntries(head.map((h, i) => [h.trim(), i]));
   if (ix.Handle == null || ix['Variant SKU'] == null) throw new Error('Not a Shopify products export (missing Handle / Variant SKU columns)');
   const get = (r, k) => (ix[k] == null ? '' : (r[ix[k]] || '').trim());
+  // Metafield columns carry the namespace in brackets, e.g. "Size Chart Type (product.metafields.custom.size_chart_type)".
+  const meta = (r, start) => { const k = head.find(h => h.trim().startsWith(start)); return k ? (r[head.indexOf(k)] || '').trim() : ''; };
   const byHandle = new Map();
   for (const r of rows) {
     const handle = get(r, 'Handle');
@@ -228,7 +242,8 @@ export function parseShopifyCsv(text) {
     if (!p) byHandle.set(handle, (p = { handle, variants: [], images: [], optionNames: [] }));
     // Product-level fields only appear on the first row of each handle.
     if (get(r, 'Title')) {
-      Object.assign(p, { title: get(r, 'Title'), description: htmlToText(get(r, 'Body (HTML)')), type: get(r, 'Type'), productCategory: get(r, 'Product Category'), tags: get(r, 'Tags'), status: (get(r, 'Status') || 'active').toLowerCase() });
+      Object.assign(p, { title: get(r, 'Title'), description: htmlToText(get(r, 'Body (HTML)')), type: get(r, 'Type'), productCategory: get(r, 'Product Category'), tags: get(r, 'Tags'), status: (get(r, 'Status') || 'active').toLowerCase(),
+        sizeChart: meta(r, 'Size Chart Type').toLowerCase(), googleCategory: get(r, 'Google Shopping / Google Product Category'), seoTitle: get(r, 'SEO Title'), seoDescription: get(r, 'SEO Description') });
       p.optionNames = [1, 2, 3].map(n => get(r, `Option${n} Name`));
     }
     const src = get(r, 'Image Src');
@@ -263,6 +278,7 @@ export function parseShopifyCsv(text) {
     if (firstColor && colorBacks[firstColor]) gallery.splice(gallery.indexOf(colorBacks[firstColor]), 1), gallery.splice(1, 0, colorBacks[firstColor]);
     return {
       handle: p.handle, title: p.title, description: p.description, type: p.type, productCategory: p.productCategory || '', status: p.status,
+      sizeChart: p.sizeChart || '', googleCategory: p.googleCategory || '', seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
       price: Math.min(...variants.map(v => v.price).filter(Boolean)) || 0,
       variants, colorImages, colorBacks, gallery,
     };

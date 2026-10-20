@@ -16,9 +16,39 @@ export async function api(path, body, headers = {}) {
 
 let site;
 export async function loadSite() {
-  if (!site) { site = await api('/api/site'); setAuthConfig(site.auth); }
+  if (!site) { site = await api('/api/site'); setAuthConfig(site.auth); analytics(site.settings); }
   return site;
 }
+
+/* ---------- analytics (GA4 + Meta Pixel, IDs set in Admin → Site content) ---------- */
+function analytics({ ga4Id, metaPixelId }) {
+  const add = src => document.head.append(Object.assign(document.createElement('script'), { async: true, src }));
+  if (/^G-[A-Z0-9]+$/.test(ga4Id || '')) {
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function () { window.dataLayer.push(arguments); };
+    window.gtag('js', new Date());
+    window.gtag('config', ga4Id);
+    add('https://www.googletagmanager.com/gtag/js?id=' + ga4Id);
+  }
+  if (/^\d{6,20}$/.test(metaPixelId || '')) {
+    const f = window.fbq = function () { f.callMethod ? f.callMethod.apply(f, arguments) : f.queue.push(arguments); };
+    window._fbq ||= f; f.push = f; f.loaded = true; f.version = '2.0'; f.queue = [];
+    add('https://connect.facebook.net/en_US/fbevents.js');
+    window.fbq('init', metaPixelId);
+    window.fbq('track', 'PageView');
+  }
+}
+// One call, both tools. items: [{ slug, name, price, qty, size, color }]
+const FB = { view_item: 'ViewContent', add_to_cart: 'AddToCart', begin_checkout: 'InitiateCheckout', purchase: 'Purchase', sign_up: 'CompleteRegistration' };
+export function track(event, { items = [], value, id } = {}) {
+  const currency = site?.settings.currency || 'INR';
+  value ??= items.reduce((t, i) => t + (i.price || 0) * (i.qty || 1), 0);
+  window.gtag?.('event', event, { currency, value, transaction_id: id, items: items.map(i => ({ item_id: i.slug, item_name: i.name, item_variant: [i.color, i.size].filter(Boolean).join(' / '), price: i.price, quantity: i.qty || 1 })) });
+  if (FB[event]) window.fbq?.('track', FB[event], { currency, value, content_type: 'product', content_ids: items.map(i => i.slug), num_items: items.reduce((t, i) => t + (i.qty || 1), 0) });
+}
+
+// Shopify-style discount links (/discount/CODE → ?discount=CODE): remembered for checkout.
+try { const c = new URLSearchParams(location.search).get('discount'); if (c) localStorage.setItem('thryftly_code', c.toUpperCase()); } catch { /* ignore */ }
 export const money = n => site.settings.symbol + (Number.isInteger(+n) ? n : (+n).toFixed(2));
 
 /* ---------- cart (localStorage, can be unavailable) ---------- */
@@ -36,6 +66,8 @@ export function addToCart(slug, size, color = '') {
   // Cap at 5 and let the server enforce real stock.
   hit ? (hit.qty = Math.min(5, hit.qty + 1)) : items.push({ slug, size, color, qty: 1 });
   setCart(items);
+  const p = site?.products.find(p => p.slug === slug), v = p?.sizes.find(v => v.label === size && (v.color || '') === color);
+  if (p) track('add_to_cart', { items: [{ slug, name: p.name, size, color, price: v?.price || p.price, qty: 1 }] });
 }
 export function updateCartCount() {
   const n = getCart().reduce((t, i) => t + i.qty, 0);

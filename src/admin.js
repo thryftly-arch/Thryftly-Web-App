@@ -19,6 +19,13 @@ function toast(t, err) {
   el.textContent = t; el.classList.toggle('err', !!err); el.classList.add('show');
   clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2600);
 }
+// Download rows as a CSV file (Excel-friendly).
+function csv(name, rows) {
+  const cell = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + rows.map(r => r.map(cell).join(',')).join('\n')], { type: 'text/csv' }));
+  a.download = name; a.click();
+}
 const h = html => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const main = () => $('.adm-main');
 let symbol = '$';
@@ -40,14 +47,14 @@ async function boot() {
   try { me = await req('GET', '/me'); } catch { return showLogin(); }
   $('.adm-login').hidden = true; $('.adm-app').hidden = false;
   const qkMode = me.qikinkBase.includes('sandbox') ? 'SANDBOX' : 'LIVE';
-  $('.adm-status').innerHTML = `<span class="${me.razorpay ? 'ok' : 'no'}">RAZORPAY ${me.razorpay ? 'ON' : 'OFF'}</span><span class="${me.qikink ? 'ok' : 'no'}">QIKINK ${me.qikink ? qkMode : 'OFF'}</span>`;
+  $('.adm-status').innerHTML = `<span class="${me.razorpay ? 'ok' : 'no'}">RAZORPAY ${me.razorpay ? 'ON' : 'OFF'}</span><span class="${me.qikink ? 'ok' : 'no'}">QIKINK ${me.qikink ? qkMode : 'OFF'}</span><span class="${me.mail ? 'ok' : 'no'}">EMAIL ${me.mail ? 'ON' : 'OFF'}</span>`;
   symbol = (await req('GET', '/settings')).symbol;
   go('overview');
 }
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ overview: viewOverview, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
+  ({ overview: viewOverview, discounts: viewDiscounts, charts: viewCharts, customers: viewCustomers, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -200,14 +207,16 @@ async function viewProducts() {
     } catch (err) { toast(err.message, true); }
   });
   $('.new', main()).addEventListener('click', () => editProduct({
+    sizeChart: '', seoTitle: '', seoDescription: '', googleCategory: '',
     name: '', edition: '', price: 0, category: '', badge: '', badgeStyle: 'yellow', tag: 'REWORKED VINTAGE', color: '', fitLabel: '', description: '',
     sizes: [{ label: 'M', color: '', stock: 1, sku: '' }], specs: [], images: { front: '', back: '', detail: '', onBody: '' }, tryonImage: '', ringLabel: '',
     featured: true, inRotation: true, active: false, sort: products.length + 1,
   }));
 }
 
-function editProduct(src) {
+async function editProduct(src) {
   const p = structuredClone(src);
+  const charts = await req('GET', '/size-charts');
   const f = (k, label, extra = '', note = '') => `<label class="adm-field ${extra}">${label}${note ? ` <small>${note}</small>` : ''}<input name="${k}" value="${esc(p[k])}"></label>`;
   main().innerHTML = `
     <div class="adm-bar"><h1 class="adm-h">${p.id ? 'EDIT' : 'NEW'} PRODUCT</h1><button class="btn-ghost back">← ALL PRODUCTS</button></div>
@@ -220,6 +229,9 @@ function editProduct(src) {
       <label class="adm-field">BADGE COLOUR<select name="badgeStyle"><option value="yellow">Yellow</option><option value="red">Red</option></select></label>
       <label class="adm-field">3D MODEL <small>automatic picks it from the category</small><select name="model3d"><option value="">Automatic</option><option value="tee">T-shirt</option><option value="hoodie">Hoodie</option><option value="sweatshirt">Sweatshirt</option><option value="none">No 3D model</option></select></label>
       ${f('ringLabel', 'RING PLACEHOLDER LABEL', '', 'shown when no image')}${f('sort', 'SORT ORDER', '', 'lower = first')}
+      <label class="adm-field">SIZE CHART <small>edit charts under Size charts</small><select name="sizeChart"><option value="">None</option>${charts.map(c => `<option value="${esc(c.key)}">${esc(c.title)}</option>`).join('')}</select></label>
+      ${f('googleCategory', 'GOOGLE PRODUCT CATEGORY', '', 'number, e.g. 212 = shirts &amp; tops')}
+      ${f('seoTitle', 'SEO TITLE', '', 'Google + link previews; blank = name')}${f('seoDescription', 'SEO DESCRIPTION', '', 'blank = description')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
       ${p.qikink ? `<p class="adm-note full" style="grid-column:1/-1;margin:0">QIKINK #${esc(p.qikink.productId)} · ${esc(p.qikink.baseCode)} · ${p.qikink.colors} colours · ${p.qikink.variants} variants on Qikink · cost ${esc(symbol)}${p.qikink.cost} → margin <b class="margin"></b></p>` : ''}
       <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand. *Price only if this variant costs more than the product price.</small>
@@ -233,6 +245,7 @@ function editProduct(src) {
   const form = $('.adm-form', main());
   form.badgeStyle.value = p.badgeStyle;
   form.model3d.value = p.model3d || '';
+  form.sizeChart.value = p.sizeChart || '';
   ['active', 'featured', 'inRotation'].forEach(k => (form[k].checked = !!p[k]));
   const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'price', ph: 'Price*', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '', price: 0 }));
   // Expand colours × existing sizes, keeping any SKUs already typed in.
@@ -352,6 +365,8 @@ const SITE_FIELDS = [
   ['GLOBAL', [['currency', 'CURRENCY CODE', 'INR for Razorpay India; USD needs international payments enabled'], ['symbol', 'CURRENCY SYMBOL'], ['shippingFee', 'SHIPPING FEE'], ['freeShippingOver', 'FREE SHIPPING OVER', '0 = never free']]],
   ['HERO', [['kicker', 'HERO KICKER', 'small line above the headline (a live drop replaces it)'], ['mobileKicker', 'MOBILE KICKER'], ['heroTitle', 'HEADLINE'], ['heroAccent', 'HEADLINE ACCENT'], ['heroText', 'HERO TEXT', '', 'textarea'], ['ctaLabel', 'MAIN BUTTON'], ['secondaryCta', 'SECOND BUTTON']]],
   ['SECTIONS & FOOTER', [['rotationTitle', 'RING TITLE'], ['productsTitle', 'PRODUCTS HEADING'], ['signupTitle', 'SIGN-UP TITLE'], ['footerWord', 'FOOTER WORDMARK']]],
+  ['EMAILS', [['welcomeCode', 'WELCOME CODE', 'shown in the welcome emails (new account, drop list). Create it under Discounts, e.g. WELCOME10'], ['reminderCode', 'CART REMINDER CODE', 'shown in the "you left something behind" email; blank = no code']]],
+  ['ANALYTICS', [['ga4Id', 'GOOGLE ANALYTICS 4 ID', 'G-XXXXXXX'], ['metaPixelId', 'META PIXEL ID', 'numbers only, from Meta Events Manager']]],
 ];
 async function viewSite() {
   const s = await req('GET', '/settings');
@@ -373,9 +388,10 @@ async function viewSite() {
       <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">CONTACT DETAILS <small>shown on the Contact page; leave blank to hide</small></h2>
       ${[['email', 'EMAIL'], ['phone', 'PHONE'], ['whatsapp', 'WHATSAPP NUMBER'], ['hours', 'HOURS']].map(([k, l]) => `<label class="adm-field">${l}<input name="contact_${k}" value="${esc(s.contact?.[k])}"></label>`).join('')}
       <label class="adm-field full">ADDRESS<textarea name="contact_address">${esc(s.contact?.address)}</textarea></label>
-      <div class="adm-actions"><span></span><button class="btn-red">SAVE SITE CONTENT</button></div>
+      <div class="adm-actions"><button type="button" class="btn-ghost test-mail">SEND ME A TEST EMAIL</button><button class="btn-red">SAVE SITE CONTENT</button></div>
     </form>`;
   const form = $('.adm-form', main());
+  $('.test-mail', form).addEventListener('click', async () => { try { toast('SENT TO ' + (await req('POST', '/test-email')).to); } catch (e) { toast(e.message, true); } });
   const marquee = s.marquee.map(t => ({ t }));
   rows($('.marquee-box', form), marquee, [{ k: 't', ph: 'Text', w: '1fr' }], () => ({ t: '' }));
   $('.adm-imgs', form).append(imgField('HERO', s.heroImage, v => (s.heroImage = v)));
@@ -428,10 +444,10 @@ async function viewMessages() {
 }
 
 /* ---------- orders ---------- */
-const STATUS = { created: ['AWAITING PAYMENT', 'grey'], paid: ['PAID', 'yel'], sent_to_qikink: ['SENT TO QIKINK', 'green'], fulfillment_failed: ['FULFILMENT FAILED', 'red'] };
+const STATUS = { created: ['AWAITING PAYMENT', 'grey'], paid: ['PAID', 'yel'], sent_to_qikink: ['SENT TO QIKINK', 'green'], fulfillment_failed: ['FULFILMENT FAILED', 'red'], refunded: ['REFUNDED', 'grey'] };
 async function viewOrders() {
   const orders = await req('GET', '/orders');
-  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">ORDERS</h1><div style="display:flex;gap:12px"><button class="btn-ghost sync">SYNC QIKINK STATUS</button><button class="btn-ghost qk">RAW QIKINK ORDERS</button></div></div>
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">ORDERS</h1><div style="display:flex;gap:12px;flex-wrap:wrap"><button class="btn-ghost export">EXPORT CSV</button><button class="btn-ghost sync">SYNC QIKINK STATUS</button><button class="btn-ghost qk">RAW QIKINK ORDERS</button></div></div>
     <p class="adm-note">Paid orders go to Qikink automatically. If one fails (missing SKU, Qikink down), fix the cause and press RETRY. “Awaiting payment” orders are abandoned checkouts.</p>
     <div class="adm-filter"><input class="q" type="search" placeholder="Search order number, name, email or phone"><select class="st"><option value="">Any status</option>${Object.entries(STATUS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select><span class="cnt"></span></div>
     <div class="list">${orders.length ? '' : '<p class="adm-note">No orders yet.</p>'}</div><pre class="adm-note qk-out"></pre>`;
@@ -456,10 +472,16 @@ async function viewOrders() {
           <br>Shipping: ${esc(symbol)}${o.shipping}${o.oversold ? '<br><span class="red">OVERSOLD — refund one buyer in Razorpay</span>' : ''}
           ${o.paymentId ? `<br>Payment: ${esc(o.paymentId)}` : ''}${o.qikink?.order_id ? `<br>Qikink order: ${esc(o.qikink.order_id)}` : ''}
           ${o.tracking ? `<br>Tracking: <a class="adm-link" href="${esc(o.tracking.url)}" target="_blank" rel="noopener">${esc(o.tracking.courier || 'courier')} ${esc(o.tracking.awb)}</a>` : ''}${o.fulfillmentError ? `<br><span class="red">${esc(o.fulfillmentError)}</span>` : ''}
-          ${o.status === 'fulfillment_failed' ? '<br><br><button class="btn-red retry">RETRY SEND TO QIKINK</button>' : ''}</div>
+          ${o.discount ? `<br>Discount: ${esc(o.discount.code)} (−${esc(symbol)}${o.discount.amount})` : ''}${o.refund ? `<br>Refunded ${esc(symbol)}${o.refund.amount} on ${new Date(o.refund.at).toLocaleDateString()}` : ''}
+          ${o.status === 'fulfillment_failed' ? '<br><br><button class="btn-red retry">RETRY SEND TO QIKINK</button>' : ''}
+          ${o.paymentId && o.status !== 'refunded' ? '<br><br><button class="adm-danger refund">CANCEL &amp; REFUND</button>' : ''}</div>
         <div>${esc(c.name)}<br>${esc(c.address1)}${c.address2 ? '<br>' + esc(c.address2) : ''}<br>${esc(c.city)}, ${esc(c.state)} ${esc(c.zip)}<br>${esc(c.phone)} · ${esc(c.email)}
           ${o.qikink ? `<pre>${esc(JSON.stringify(o.qikink, null, 1))}</pre>` : ''}</div>
       </div></details>`);
+    $('.refund', el)?.addEventListener('click', async () => {
+      if (!confirm(`Refund ${symbol}${o.amount} to ${o.customer.name} through Razorpay and email them?${o.status === 'sent_to_qikink' ? '\n\nQikink already has this order: cancel it in the Qikink dashboard too.' : ''}`)) return;
+      try { await req('POST', `/orders/${o.id}/refund`); toast('REFUNDED · CUSTOMER EMAILED'); viewOrders(); } catch (e) { toast(e.message, true); }
+    });
     $('.retry', el)?.addEventListener('click', async () => {
       try { const r = await req('POST', `/orders/${o.id}/fulfill`); toast(r.status === 'sent_to_qikink' ? 'SENT TO QIKINK' : r.fulfillmentError, r.status !== 'sent_to_qikink'); viewOrders(); } catch (e) { toast(e.message, true); }
     });
@@ -467,12 +489,110 @@ async function viewOrders() {
     list.append(el);
   }
   filter();
+  $('.export', main()).addEventListener('click', () => csv('thryftly-orders.csv', [
+    ['order', 'date', 'status', 'name', 'email', 'phone', 'address', 'city', 'state', 'pin', 'items', 'subtotal', 'discount code', 'discount', 'shipping', 'total', 'payment id', 'qikink order', 'tracking'],
+    ...orders.map(o => [o.number, o.createdAt, o.qikinkStatus || o.status, o.customer.name, o.customer.email, o.customer.phone, [o.customer.address1, o.customer.address2].filter(Boolean).join(', '), o.customer.city, o.customer.state, o.customer.zip,
+      o.items.map(i => `${i.qty}x ${i.name} (${[i.color, i.size].filter(Boolean).join('/')})`).join('; '), o.subtotal, o.discount?.code || '', o.discount?.amount || 0, o.shipping, o.amount, o.paymentId || '', o.qikink?.order_id || '', o.tracking?.url || '']),
+  ]));
   $('.sync', main()).addEventListener('click', async () => {
     try { const r = await req('POST', '/orders/sync'); toast(`SYNCED ${r.synced} ORDERS`); viewOrders(); } catch (e) { toast(e.message, true); }
   });
   $('.qk', main()).addEventListener('click', async () => {
     try { $('.qk-out', main()).textContent = 'Orders on Qikink:\n' + JSON.stringify(await req('GET', '/qikink/orders'), null, 2); } catch (e) { toast(e.message, true); }
   });
+}
+
+/* ---------- discounts ---------- */
+const DTYPE = { percent: '% OFF', flat: 'OFF', freeship: 'FREE SHIPPING' };
+const dLabel = d => d.type === 'percent' ? `${d.value}% OFF` : d.type === 'flat' ? `${symbol}${d.value} OFF` : 'FREE SHIPPING';
+async function viewDiscounts() {
+  const list = await req('GET', '/discounts');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">DISCOUNTS</h1><button class="btn-red new">+ NEW CODE</button></div>
+    <p class="adm-note">Codes customers type at checkout. Share a link that fills the code in for them: <b>yoursite/discount/CODE</b> (old Shopify discount links keep working). Put a code in the welcome and cart-reminder emails under Site content → Emails.</p>
+    <table class="adm-table"><thead><tr><th>CODE</th><th>GIVES</th><th class="hide-sm">MIN ORDER</th><th>USED</th><th class="hide-sm">ENDS</th><th>STATUS</th><th></th></tr></thead><tbody>
+    ${list.map((d, i) => `<tr><td><b>${esc(d.code)}</b>${d.note ? `<br><small>${esc(d.note)}</small>` : ''}</td><td>${esc(dLabel(d))}</td><td class="hide-sm">${d.minOrder ? esc(symbol) + d.minOrder : '—'}</td><td>${d.used || 0}${d.limit ? ' / ' + d.limit : ''}</td><td class="hide-sm">${d.endsAt ? new Date(d.endsAt).toLocaleDateString() : '—'}</td>
+      <td>${d.active && !(d.endsAt && Date.parse(d.endsAt) < Date.now()) ? '<span class="adm-pill green">ON</span>' : '<span class="adm-pill grey">OFF</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="7">No codes yet.</td></tr>'}</tbody></table>`;
+  main().querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => editDiscount(list[b.dataset.i])));
+  $('.new', main()).addEventListener('click', () => editDiscount({ code: '', type: 'percent', value: 10, minOrder: 0, limit: 0, oncePerCustomer: true, startsAt: '', endsAt: '', active: true, note: '' }));
+}
+function editDiscount(src) {
+  const d = structuredClone(src);
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">${d.id ? 'EDIT' : 'NEW'} CODE</h1><button class="btn-ghost back">← ALL CODES</button></div>
+    <form class="adm-form">
+      <label class="adm-field">CODE <small>letters and numbers, e.g. WELCOME10</small><input name="code" value="${esc(d.code)}" required></label>
+      <label class="adm-field">TYPE<select name="type"><option value="percent">Percentage off</option><option value="flat">Fixed amount off</option><option value="freeship">Free shipping</option></select></label>
+      <label class="adm-field">VALUE <small>% or ${esc(symbol)}; ignored for free shipping</small><input name="value" type="number" min="0" value="${d.value}"></label>
+      <label class="adm-field">MINIMUM ORDER (${esc(symbol)}) <small>0 = none</small><input name="minOrder" type="number" min="0" value="${d.minOrder}"></label>
+      <label class="adm-field">TOTAL USES <small>0 = unlimited; used ${d.used || 0} so far</small><input name="limit" type="number" min="0" value="${d.limit}"></label>
+      <label class="adm-field">NOTE <small>only you see this</small><input name="note" value="${esc(d.note)}"></label>
+      <label class="adm-field">STARTS <small>empty = now</small><input name="startsAt" type="datetime-local" value="${local(d.startsAt)}"></label>
+      <label class="adm-field">ENDS <small>empty = never</small><input name="endsAt" type="datetime-local" value="${local(d.endsAt)}"></label>
+      <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> CODE IS ON</label><label><input type="checkbox" name="oncePerCustomer"> ONCE PER CUSTOMER (by email)</label></div>
+      <div class="adm-actions">${d.id ? '<button type="button" class="adm-danger del">DELETE CODE</button>' : '<span></span>'}<button class="btn-red">SAVE CODE</button></div>
+    </form>`;
+  const form = $('.adm-form', main());
+  form.type.value = d.type; form.active.checked = !!d.active; form.oncePerCustomer.checked = !!d.oncePerCustomer;
+  $('.back', main()).addEventListener('click', viewDiscounts);
+  $('.del', main())?.addEventListener('click', async () => { if (confirm(`Delete ${d.code}?`)) { await req('DELETE', '/discounts/' + d.id); toast('DELETED'); viewDiscounts(); } });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    const body = { ...d, ...fd, active: form.active.checked, oncePerCustomer: form.oncePerCustomer.checked,
+      startsAt: fd.startsAt ? new Date(fd.startsAt).toISOString() : '', endsAt: fd.endsAt ? new Date(fd.endsAt).toISOString() : '' };
+    try { const saved = await req(d.id ? 'PUT' : 'POST', '/discounts' + (d.id ? '/' + d.id : ''), body); toast('SAVED'); editDiscount(saved); } catch (err) { toast(err.message, true); }
+  });
+}
+
+/* ---------- size charts ---------- */
+async function viewCharts() {
+  const list = await req('GET', '/size-charts');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">SIZE CHARTS</h1><button class="btn-red new">+ NEW CHART</button></div>
+    <p class="adm-note">One chart per kind of garment. Products point at a chart (set on each product; the Shopify import kept your old chart types). A product page shows a SIZE CHART button once its chart has an image or measurements. Qikink's size charts for each blank are in the Qikink catalogue: screenshot or export them and upload here.</p>
+    <table class="adm-table"><thead><tr><th></th><th>CHART</th><th>PRODUCTS</th><th>STATUS</th><th></th></tr></thead><tbody>
+    ${list.map((c, i) => `<tr><td><div class="adm-thumb" style="background-image:${esc(cssUrl(c.image))}"></div></td><td><b>${esc(c.title)}</b><br><small>${esc(c.key)}</small></td><td>${c.products}</td>
+      <td>${c.image || c.note ? '<span class="adm-pill green">SHOWN</span>' : '<span class="adm-pill yel">EMPTY</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="5">No size charts yet.</td></tr>'}</tbody></table>`;
+  main().querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => editChart(list[b.dataset.i])));
+  $('.new', main()).addEventListener('click', () => editChart({ key: '', title: '', image: '', note: '' }));
+}
+function editChart(src) {
+  const c = structuredClone(src);
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">${c.id ? 'EDIT' : 'NEW'} SIZE CHART</h1><button class="btn-ghost back">← ALL CHARTS</button></div>
+    <form class="adm-form">
+      <label class="adm-field">NAME <small>e.g. OVERSIZED HOODIE</small><input name="title" value="${esc(c.title)}" required></label>
+      <label class="adm-field">KEY <small>what products point at; blank = from the name</small><input name="key" value="${esc(c.key)}"></label>
+      <div class="adm-field full">CHART IMAGE <small>a picture of the size table</small><div class="adm-imgs"></div></div>
+      <label class="adm-field full">MEASUREMENTS / NOTES <small>optional text under the image, e.g. "Chest 44 / 46 / 48 in. Model is 6ft wearing L."</small><textarea name="note">${esc(c.note)}</textarea></label>
+      <div class="adm-actions">${c.id ? '<button type="button" class="adm-danger del">DELETE CHART</button>' : '<span></span>'}<button class="btn-red">SAVE CHART</button></div>
+    </form>`;
+  const form = $('.adm-form', main());
+  $('.adm-imgs', form).append(imgField('SIZE CHART', c.image, v => (c.image = v)));
+  $('.back', main()).addEventListener('click', viewCharts);
+  $('.del', main())?.addEventListener('click', async () => { if (confirm(`Delete ${c.title}? Products using it stop showing a size chart.`)) { await req('DELETE', '/size-charts/' + c.id); toast('DELETED'); viewCharts(); } });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = { ...c, ...Object.fromEntries(new FormData(form)), image: c.image };
+    try { const saved = await req(c.id ? 'PUT' : 'POST', '/size-charts' + (c.id ? '/' + c.id : ''), body); toast('SAVED'); editChart(saved); } catch (err) { toast(err.message, true); }
+  });
+}
+
+/* ---------- customers ---------- */
+async function viewCustomers() {
+  const list = await req('GET', '/customers');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">CUSTOMERS</h1><button class="btn-ghost export">EXPORT CSV</button></div>
+    <p class="adm-note">Everyone who has paid for an order, made an account or joined the drop list.</p>
+    <div class="adm-filter"><input class="q" type="search" placeholder="Search name, email, phone or city"><select class="st"><option value="">Everyone</option><option value="buyers">Has ordered</option><option value="account">Has an account</option><option value="subscribed">On the drop list</option></select><span class="cnt"></span></div>
+    <table class="adm-table"><thead><tr><th>CUSTOMER</th><th class="hide-sm">CITY</th><th>ORDERS</th><th>SPENT</th><th class="hide-sm">LAST ORDER</th><th class="hide-sm"></th></tr></thead><tbody></tbody></table>`;
+  const draw = () => {
+    const q = $('.q', main()).value.trim().toLowerCase(), st = $('.st', main()).value;
+    const shown = list.filter(c => (!q || [c.name, c.email, c.phone, c.city].some(v => String(v).toLowerCase().includes(q))) && (!st || (st === 'buyers' ? c.orders > 0 : c[st])));
+    $('.cnt', main()).textContent = `${shown.length} OF ${list.length}`;
+    $('tbody', main()).innerHTML = shown.map(c => `<tr><td><b>${esc(c.name || '—')}</b><br><a class="adm-link" href="mailto:${esc(c.email)}">${esc(c.email)}</a>${c.phone ? `<br><small>${esc(c.phone)}</small>` : ''}</td>
+      <td class="hide-sm">${esc(c.city)}</td><td>${c.orders}</td><td>${esc(symbol)}${Math.round(c.spent).toLocaleString('en-IN')}</td><td class="hide-sm">${c.last ? new Date(c.last).toLocaleDateString() : '—'}</td>
+      <td class="hide-sm">${c.account ? '<span class="adm-pill green">ACCOUNT</span> ' : ''}${c.subscribed ? '<span class="adm-pill yel">DROP LIST</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="6">Nobody yet.</td></tr>';
+  };
+  ['.q', '.st'].forEach(sel => $(sel, main()).addEventListener('input', draw));
+  draw();
+  $('.export', main()).addEventListener('click', () => csv('thryftly-customers.csv', [['name', 'email', 'phone', 'city', 'orders', 'spent', 'last order', 'account', 'drop list'], ...list.map(c => [c.name, c.email, c.phone, c.city, c.orders, c.spent, c.last, c.account ? 'yes' : 'no', c.subscribed ? 'yes' : 'no'])]));
 }
 
 /* ---------- subscribers ---------- */

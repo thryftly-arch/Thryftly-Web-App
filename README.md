@@ -63,6 +63,7 @@ Netlify serves the pages from `dist/` and runs the API as one function (`netlify
 | `SUPABASE_URL` | from step 1 |
 | `SUPABASE_SECRET_KEY` | from step 1 |
 | `SUPABASE_PUBLISHABLE_KEY` | from step 1 (`sb_publishable_…`): turns on customer accounts |
+| `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `OWNER_EMAIL` | see **Emails** below |
 | `SITE_URL` | `https://your-domain`, no trailing slash |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard |
 | `QIKINK_BASE_URL`, `QIKINK_CLIENT_ID`, `QIKINK_CLIENT_SECRET` | Qikink dashboard (live: `https://api.qikink.com`) |
@@ -87,6 +88,56 @@ What's different on Netlify:
 - The WooCommerce receiver logs go to Netlify's function log, not to `data/woo-log.jsonl`.
 
 `npm run check` tests the Supabase backend and the Netlify function against a fake Supabase on localhost (reads, changed-rows-only saves, deletes, image uploads, admin sign-in).
+
+## Emails (from thryftly@gmail.com)
+
+Every email the shop sends comes from your own address, in the THRYFTLY style:
+
+| Email | Goes to | When |
+|---|---|---|
+| Order confirmed | customer | payment goes through |
+| New order | you (`OWNER_EMAIL`) | payment goes through, with a warning if it didn't reach Qikink |
+| Shipped, with tracking link | customer | Qikink adds tracking (checked every hour) |
+| Delivered | customer | Qikink marks it delivered |
+| Refund | customer | you press **Cancel & refund** in Admin → Orders |
+| Welcome + code | customer | first time they open their account |
+| Drop list welcome + code | subscriber | they join the drop list (has an unsubscribe link) |
+| Message received / new message | customer / you | contact form |
+| You left something behind | customer | checkout started, not paid, 1–72 h ago (once; the link restores the cart) |
+| Confirm email, reset password, magic link, email change | customer | Supabase Auth, same design (see below) |
+
+**Gmail setup (about 5 minutes):**
+1. Sign in to thryftly@gmail.com. Go to **Google Account → Security** and turn on **2-Step Verification**.
+2. Go to **Security → App passwords** (or search "App passwords"), create one named "THRYFTLY site", and copy the 16-character password.
+3. Add these to `.env` and to Netlify's environment variables:
+   `SMTP_USER=thryftly@gmail.com`, `SMTP_PASS=<the app password>`, `MAIL_FROM=THRYFTLY <thryftly@gmail.com>`, `OWNER_EMAIL=<where order alerts should go>`.
+4. Admin → Site content → **Send me a test email**.
+
+Gmail allows about 500 emails a day. If you outgrow that or want a @thryftly.in address, switch to a domain email with Resend, Brevo or Zoho: only `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` and `SMTP_PASS` change.
+
+**Supabase sign-up emails (confirm link went to localhost, sender was Supabase):** both are Supabase settings. One command sets them all:
+1. Create a personal access token at supabase.com/dashboard/account/tokens and put it in `.env` as `SUPABASE_ACCESS_TOKEN` (local only, never on Netlify).
+2. Set `SITE_URL` in `.env` to the live address, and fill in the SMTP lines above.
+3. Run `npm run setup:auth`. It sets the Site URL and allowed redirect links, makes Supabase send through thryftly@gmail.com, and installs the branded templates.
+
+Without a token, `npm run setup:auth` writes the templates to `supabase/templates/`. Then do it by hand in Supabase:
+- **Authentication → URL Configuration:** set Site URL to your live address, and add `https://<site>/account.html` under Redirect URLs.
+- **Authentication → Emails → SMTP Settings:** host `smtp.gmail.com`, port `465`, username thryftly@gmail.com, the app password, sender THRYFTLY.
+- **Authentication → Emails → Templates:** paste each file in.
+
+## Moved over from Shopify
+
+Your Shopify export used these, and they all exist here now:
+- **Size charts:** the 8 chart types (terry, oversized hoodie, hoodie, zip hoodie, oversized sweatshirt, oversized shirt, classic, acid wash) are under Admin → **Size charts**, already linked to the 76 products that had them. The images lived in the Shopify theme, so upload each chart once; the SIZE CHART button appears on product pages as soon as a chart has an image.
+- **Discount codes:** Admin → **Discounts** (percentage, fixed amount, free shipping, minimum order, total uses, once per customer, start/end dates). Shopify links like `/discount/WELCOME10` still work. Recreate **WELCOME10** there with the same terms you had on Shopify, and set it as the welcome code under Site content → Emails.
+- **Old links:** `/products/<handle>`, `/collections/…`, `/pages/…`, `/policies/…`, `/cart` and `/account` redirect (301) to the new pages, so Google rankings, Instagram bios and old WhatsApp links keep working.
+- **SEO:** `/sitemap.xml` and `/robots.txt`. Product pages carry their title, description, photo, price and Google Product data (from each product's SEO fields), so links shared on WhatsApp and Instagram show a proper preview.
+- **Google Shopping:** a Merchant Center feed at `/feeds/google.xml` (every colour × size, with the Google categories from Shopify). In Merchant Center, add it as a scheduled-fetch feed.
+- **Analytics:** paste your GA4 ID and Meta Pixel ID in Admin → Site content → Analytics. Page views, product views, add to cart, checkout and purchases are tracked.
+- **Customers:** Admin → **Customers** lists everyone who has ordered, made an account or joined the drop list, with orders and total spent. Exports to CSV, and so do orders.
+- **Refunds:** Admin → Orders → **Cancel & refund** refunds through Razorpay and emails the customer.
+
+Not carried over: the review fields (empty on every product), gift cards (none), and the "conversation starters" app.
 
 ## Setting up each integration
 

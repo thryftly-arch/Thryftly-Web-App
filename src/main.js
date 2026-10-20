@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -116,6 +116,18 @@ if (isProduct) {
   badge.hidden = !p.badge;
   badge.classList.add(p.badgeStyle === 'red' ? 'tag-red' : 'tag-yel');
   $('.specs').innerHTML = p.specs.map(s => `<span>${esc(s.k)}</span><span>${esc(s.v)}</span>`).join('');
+  track('view_item', { items: [{ slug: p.slug, name: p.name, price: p.price }] });
+
+  // Size chart for this kind of garment (Admin → Size charts), in a dialog.
+  if (p.sizeChart) {
+    $('.sizes .sizes-label').insertAdjacentHTML('afterend', '<button type="button" class="chart-btn">SIZE CHART</button>');
+    document.body.insertAdjacentHTML('beforeend', `<dialog class="chart-dlg" aria-label="Size chart"><div class="chart-head"><b>${esc(p.sizeChart.title)} — SIZE CHART</b><button type="button" class="chart-x" aria-label="Close">✕</button></div>
+      ${p.sizeChart.image ? `<img src="${esc(p.sizeChart.image)}" alt="Size chart for ${esc(p.sizeChart.title)}">` : ''}${p.sizeChart.note ? `<p class="chart-note">${esc(p.sizeChart.note)}</p>` : ''}</dialog>`);
+    const dlg = $('.chart-dlg');
+    $('.chart-btn').addEventListener('click', () => dlg.showModal());
+    $('.chart-x').addEventListener('click', () => dlg.close());
+    dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+  }
 
   // Variants are colour × size. Colour buttons only appear when a product has colours.
   const colors = [...new Set(p.sizes.map(v => v.color).filter(Boolean))];

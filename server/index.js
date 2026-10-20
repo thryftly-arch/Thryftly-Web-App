@@ -10,13 +10,15 @@ import multer from 'multer';
 
 import * as S from './store.js';
 import * as I from './integrations.js';
+import * as M from './mail.js';
 
 const { db, save, id, UPLOAD_DIR, DATA_DIR } = S;
 
 // LAMBDA: running as the Netlify function (netlify/functions/api.mjs), not as a long-lived server.
 const LAMBDA = !!process.env.LAMBDA_TASK_ROOT;
 const PROD = process.env.NODE_ENV === 'production' || LAMBDA;
-const PORT = +process.env.PORT || 3000;
+// --port=N (npm run dev pins 3000: the preview launcher sets PORT to Vite's port) beats $PORT.
+const PORT = +(process.argv.find(a => a.startsWith('--port='))?.slice(7)) || +process.env.PORT || 3000;
 const siteUrl = () => (process.env.SITE_URL || `http://localhost:${PORT}`).replace(/\/+$/, '');
 const SESSION_SECRET = process.env.SESSION_SECRET || (PROD ? '' : 'dev-only-secret');
 if (PROD && (!SESSION_SECRET || !process.env.ADMIN_PASSWORD)) {
@@ -34,11 +36,11 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
+      scriptSrc: ["'self'", 'https://checkout.razorpay.com', 'https://www.googletagmanager.com', 'https://connect.facebook.net'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-      connectSrc: ["'self'", 'https://*.razorpay.com', 'https://*.supabase.co'],
+      connectSrc: ["'self'", 'https://*.razorpay.com', 'https://*.supabase.co', 'https://*.google-analytics.com', 'https://www.googletagmanager.com', 'https://www.facebook.com'],
       frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
       mediaSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: PROD ? [] : null,
@@ -76,7 +78,18 @@ const publicProduct = p => ({
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
   sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
   unlocksAt: lockedUntil(p.id),
+  sizeChart: chartFor(p), seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
 });
+const chartFor = p => { const c = p.sizeChart && db.sizeCharts.find(c => c.key === p.sizeChart); return c && (c.image || c.note) ? { title: c.title, image: c.image, note: c.note } : null; };
+
+/* ---------------- email helpers ---------------- */
+const sym = () => db.settings.symbol || '₹';
+// Absolute image URL (emails, feeds, social previews).
+const absImg = u => (!u ? '' : u.startsWith('/uploads/') ? (S.remote ? S.fileUrl(u.slice(9)) : siteUrl() + u) : u);
+const itemImage = i => { const p = db.products.find(p => p.id === i.productId); return p ? p.colorImages?.[i.color] || p.images.front : ''; };
+const mailOrder = (to, build, o) => M.send(to, build({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg));
+const token = v => crypto.createHmac('sha256', SESSION_SECRET).update(v).digest('hex').slice(0, 32);
+const unsubUrl = email => `${siteUrl()}/api/unsubscribe?e=${encodeURIComponent(email)}&t=${token('unsub:' + email)}`;
 const activeProducts = () => db.products.filter(p => p.active).sort((a, b) => a.sort - b.sort);
 
 // Drops that are switched on and haven't ended. Products in a drop that hasn't opened yet are
@@ -141,23 +154,61 @@ app.get('/api/products/:slug', (req, res) => {
   pubJson(res, publicProduct(p));
 });
 
-app.post('/api/subscribe', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), (req, res) => {
+app.post('/api/subscribe', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async (req, res) => {
   const email = str(req.body.email, 200).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, 'Enter a valid email');
-  if (!db.subscribers.some(s => s.email === email)) { db.subscribers.push({ email, at: new Date().toISOString() }); save(); }
+  if (!db.subscribers.some(s => s.email === email)) {
+    db.subscribers.push({ email, at: new Date().toISOString() });
+    save();
+    await M.send(email, M.welcomeSubscriber(email, db.settings.welcomeCode, unsubUrl(email)));
+  }
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/contact', rateLimit({ windowMs: 15 * 60e3, limit: 5 }), (req, res) => {
+// One-click unsubscribe from the link in drop-list emails.
+app.get('/api/unsubscribe', wrap(async (req, res) => {
+  const email = str(req.query.e, 200).toLowerCase(), ok = email && str(req.query.t, 64) === token('unsub:' + email);
+  if (ok && db.subscribers.some(s => s.email === email)) { db.subscribers = db.subscribers.filter(s => s.email !== email); await save(); }
+  res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>THRYFTLY</title><body style="margin:0;background:#0b0b0c;color:#fff;font:16px Arial;display:grid;place-items:center;min-height:100vh;text-align:center"><div><h1 style="font:900 italic 34px Arial Black,Arial">${ok ? "YOU'RE <span style=color:#FF3B3B>UNSUBSCRIBED.</span>" : 'LINK <span style=color:#FF3B3B>EXPIRED.</span>'}</h1><p>${ok ? "You won't get drop emails any more. Order emails still arrive." : 'Reply to any of our emails and we will remove you.'}</p><p><a href="/" style="color:#FFD84D">Back to the shop</a></p></div>`);
+}));
+
+app.post('/api/contact', rateLimit({ windowMs: 15 * 60e3, limit: 5 }), wrap(async (req, res) => {
   const m = { id: id(), name: str(req.body.name, 100), email: str(req.body.email, 200).toLowerCase(), order: str(req.body.order, 30), message: str(req.body.message, 3000), at: new Date().toISOString(), read: false };
   if (!m.name || !m.message) return fail(res, 400, 'Add your name and a message');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email)) return fail(res, 400, 'Enter a valid email');
   db.messages.push(m); save();
+  // To the shop (reply goes straight to the customer) and a "we got it" to the customer.
+  await Promise.all([M.send(M.ownerEmail(), M.contactToOwner(m), { replyTo: m.email }), M.send(m.email, M.contactAutoReply(m))]);
   res.json({ ok: true });
-});
+}));
 
 // Customer order tracking: needs the order number AND the email it was placed with.
-const CUSTOMER_STATUS = { created: 'AWAITING PAYMENT', paid: 'CONFIRMED', sent_to_qikink: 'IN PRODUCTION', fulfillment_failed: 'CONFIRMED' };
+const CUSTOMER_STATUS = { created: 'AWAITING PAYMENT', paid: 'CONFIRMED', sent_to_qikink: 'IN PRODUCTION', fulfillment_failed: 'CONFIRMED', refunded: 'CANCELLED & REFUNDED' };
+
+// Qikink's status and tracking onto an order. Emails the customer once when it ships and once when it's delivered.
+async function applyQikink(o, q) {
+  o.qikinkStatus = q.status;
+  if (q.shipping?.tracking_link) o.tracking = { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name };
+  o.mailed ||= {};
+  const jobs = [];
+  if (o.tracking?.url && !o.mailed.shipped) { o.mailed.shipped = true; jobs.push(mailOrder(o.customer.email, M.orderShipped, o)); }
+  if (/deliver/i.test(q.status || '') && !/undeliver|rto|return/i.test(q.status) && !o.mailed.delivered) { o.mailed.delivered = true; jobs.push(mailOrder(o.customer.email, M.orderDelivered, o)); }
+  await Promise.all(jobs);
+}
+
+// Status + tracking for every open order. Qikink pages at 10, so ask in chunks of 10.
+async function syncQikink() {
+  if (!I.qikinkConfigured()) return 0;
+  const open = db.orders.filter(o => o.qikink?.order_id && o.status !== 'refunded' && !/deliver|cancel|return/i.test(o.qikinkStatus || ''));
+  for (let i = 0; i < open.length; i += 10) {
+    const chunk = open.slice(i, i + 10);
+    for (const q of await I.qikinkOrders({ ids: chunk.map(o => o.qikink.order_id).join(',') })) {
+      const o = chunk.find(o => String(o.qikink.order_id) === String(q.order_id));
+      if (o) await applyQikink(o, q);
+    }
+  }
+  return open.length;
+}
 app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async (req, res) => {
   const number = str(req.body.number, 30).toLowerCase().replace(/^#/, ''), email = str(req.body.email, 200).toLowerCase();
   const o = db.orders.find(o => o.number.toLowerCase() === number && o.customer.email.toLowerCase() === email);
@@ -166,7 +217,7 @@ app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async
   if (o.qikink?.order_id && I.qikinkConfigured() && Date.now() - (o.trackedAt || 0) > 10 * 60e3) {
     try {
       const [q] = await I.qikinkOrders({ id: o.qikink.order_id });
-      if (q) { o.qikinkStatus = q.status; if (q.shipping?.tracking_link) o.tracking = { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name }; }
+      if (q) await applyQikink(o, q);
       o.trackedAt = Date.now(); save();
     } catch { /* show what we have */ }
   }
@@ -179,7 +230,19 @@ app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async
 }));
 
 /* ---------------- checkout ---------------- */
-function priceCart(items) {
+// Discount codes (Admin → Discounts). Errors carry .discount so a quote can still show the cart.
+function applyDiscount(code, subtotal, email) {
+  const c = String(code || '').trim().toUpperCase(), d = db.discounts.find(d => d.code === c), now = Date.now();
+  const no = m => Object.assign(new Error(m), { discount: true });
+  if (!d || !d.active || (d.startsAt && Date.parse(d.startsAt) > now) || (d.endsAt && Date.parse(d.endsAt) < now)) throw no(`${c} isn't a valid code`);
+  if (d.limit && (d.used || 0) >= d.limit) throw no(`${c} has been fully used`);
+  if (d.minOrder && subtotal < d.minOrder) throw no(`${c} needs an order of ${sym()}${d.minOrder} or more`);
+  if (d.oncePerCustomer && email && db.orders.some(o => o.paidAt && o.discount?.code === c && o.customer.email.toLowerCase() === email.toLowerCase())) throw no(`You've already used ${c}`);
+  const amount = d.type === 'percent' ? Math.round(subtotal * Math.min(100, d.value) / 100) : d.type === 'flat' ? Math.min(d.value, subtotal) : 0;
+  return { code: c, type: d.type, amount, freeShipping: d.type === 'freeship' };
+}
+
+function priceCart(items, code = '', email = '') {
   if (!Array.isArray(items) || !items.length || items.length > 20) throw new Error('Your cart is empty');
   const lines = items.map(it => {
     const p = activeProducts().find(p => p.slug === it.slug);
@@ -195,12 +258,25 @@ function priceCart(items) {
   });
   const subtotal = lines.reduce((t, l) => t + l.price * l.qty, 0);
   const { shippingFee, freeShippingOver } = db.settings;
-  const shipping = freeShippingOver && subtotal >= freeShippingOver ? 0 : shippingFee || 0;
-  return { lines, subtotal, shipping, amount: subtotal + shipping };
+  const discount = code ? applyDiscount(code, subtotal, email) : null;
+  const shipping = discount?.freeShipping || (freeShippingOver && subtotal >= freeShippingOver) ? 0 : shippingFee || 0;
+  return { lines, subtotal, discount, shipping, amount: Math.max(1, subtotal - (discount?.amount || 0) + shipping) };
 }
 
 app.post('/api/cart/quote', (req, res) => {
-  try { res.json(priceCart(req.body.items)); } catch (e) { fail(res, 400, e.message); }
+  try { res.json(priceCart(req.body.items, req.body.code, str(req.body.email, 200))); } catch (e) {
+    if (!e.discount) return fail(res, 400, e.message);
+    try { res.json({ ...priceCart(req.body.items), discountError: e.message }); } catch (e2) { fail(res, 400, e2.message); }
+  }
+});
+
+// Abandoned-checkout email link: puts the cart (and the details they typed) back.
+app.get('/api/cart/restore', (req, res) => {
+  const [oid, t] = str(req.query.k, 80).split('.');
+  const o = oid && t === token('cart:' + oid) && db.orders.find(o => o.id === oid);
+  if (!o) return fail(res, 404, 'That link has expired');
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ items: o.items.map(i => ({ slug: i.slug, size: i.size, color: i.color, qty: i.qty })), customer: o.customer, code: o.discount?.code || '' });
 });
 
 const customerFields = ['name', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'zip'];
@@ -217,12 +293,12 @@ function readCustomer(b = {}) {
 app.post('/api/checkout', rateLimit({ windowMs: 15 * 60e3, limit: 30 }), wrap(async (req, res) => {
   if (!I.razorpayConfigured()) return fail(res, 503, 'Payments are not set up yet');
   let cart, customer;
-  try { cart = priceCart(req.body.items); customer = readCustomer(req.body.customer); } catch (e) { return fail(res, 400, e.message); }
+  try { customer = readCustomer(req.body.customer); cart = priceCart(req.body.items, req.body.code, customer.email); } catch (e) { return fail(res, 400, e.message); }
   const user = await S.authUser(bearer(req));
   const order = {
     id: id(),
     number: 'th' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex'), // 14 chars, Qikink allows 15
-    items: cart.lines, subtotal: cart.subtotal, shipping: cart.shipping, amount: cart.amount,
+    items: cart.lines, subtotal: cart.subtotal, shipping: cart.shipping, amount: cart.amount, discount: cart.discount ? { code: cart.discount.code, amount: cart.discount.amount } : null,
     currency: db.settings.currency, customer, status: 'created', createdAt: new Date().toISOString(),
     ...(user && { userId: user.id }),
   };
@@ -250,8 +326,13 @@ async function markPaid(order, paymentId) {
     if (s) s.stock -= l.qty;
     if (s && s.stock < 0) { s.stock = 0; order.oversold = true; } // two people paid for a 1-of-1: refund one by hand
   }
+  const d = order.discount && db.discounts.find(d => d.code === order.discount.code);
+  if (d) d.used = (d.used || 0) + 1;
   save();
   await fulfill(order);
+  order.mailed = { ...order.mailed, confirmed: true };
+  await Promise.all([mailOrder(order.customer.email, M.orderConfirmed, order), mailOrder(M.ownerEmail(), M.newOrderAlert, order)]);
+  save();
 }
 
 async function fulfill(order) {
@@ -276,7 +357,7 @@ const needUser = wrap(async (req, res, next) => {
 });
 // A customer's orders: placed while signed in, or (once their email is confirmed) guest orders to that email.
 const mine = u => db.orders.filter(o => o.status !== 'created' && (o.userId === u.id || (u.verified && o.customer.email.toLowerCase() === u.email)));
-app.get('/api/account', needUser, (req, res) => {
+app.get('/api/account', needUser, wrap(async (req, res) => {
   const byId = Object.fromEntries(db.products.map(p => [p.id, p]));
   const orders = mine(req.user).reverse().map(o => ({
     number: o.number, placed: o.createdAt, amount: o.amount,
@@ -284,9 +365,15 @@ app.get('/api/account', needUser, (req, res) => {
     tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
     items: o.items.map(i => { const p = byId[i.productId]; return { slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: p ? p.colorImages?.[i.color] || p.images.front : '' }; }),
   }));
+  // First visit to the account: send the welcome email once.
+  if (!(await S.getRow('customers', req.user.id))) {
+    await S.putRow('customers', req.user.id, { email: req.user.email, since: new Date().toISOString() });
+    await M.send(req.user.email, M.welcomeAccount(req.user.email, db.settings.welcomeCode));
+  }
+  const last = mine(req.user).at(-1)?.customer || null;
   res.set('Cache-Control', 'private, no-store');
-  pubJson(res, { email: req.user.email, verified: req.user.verified, orders });
-});
+  pubJson(res, { email: req.user.email, verified: req.user.verified, orders, address: last });
+}));
 app.get('/api/account/wishlist', needUser, wrap(async (req, res) => {
   res.set('Cache-Control', 'private, no-store');
   res.json({ slugs: (await S.getRow('wishlists', req.user.id))?.slugs || [] });
@@ -296,6 +383,51 @@ app.put('/api/account/wishlist', rateLimit({ windowMs: 60e3, limit: 60 }), needU
   await S.putRow('wishlists', req.user.id, { slugs, at: new Date().toISOString() });
   res.json({ slugs });
 }));
+
+/* ---------------- search engines + Google Merchant Center ---------------- */
+const xml = v => String(v ?? '').replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+const productLink = p => `${siteUrl()}/product.html?p=${encodeURIComponent(p.slug)}`;
+const feedCache = res => res.set({ 'Cache-Control': 'public, max-age=3600', 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=3600, stale-while-revalidate=86400', 'Netlify-Cache-Tag': 'site' });
+app.get('/api/sitemap.xml', (req, res) => {
+  const pages = ['/', '/shop.html', '/about.html', '/contact.html', '/track.html', ...['shipping', 'returns', 'privacy', 'terms'].map(k => '/policy.html?p=' + k)];
+  const urls = [...pages.map(u => siteUrl() + u), ...activeProducts().map(productLink)];
+  feedCache(res).type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `<url><loc>${xml(u)}</loc></url>`).join('\n')}\n</urlset>\n`);
+});
+app.get('/api/robots.txt', (req, res) => {
+  feedCache(res).type('text/plain').send(`User-agent: *\nDisallow: /admin\nDisallow: /checkout\nDisallow: /account\nSitemap: ${siteUrl()}/sitemap.xml\n`);
+});
+// One entry per colour × size, grouped by product, as Merchant Center wants for apparel.
+app.get('/api/feeds/google.xml', (req, res) => {
+  const items = activeProducts().flatMap(p => p.sizes.map(v => {
+    const img = absImg(p.colorImages?.[v.color] || p.images.front), ok = v.stock > 0 && (!!v.sku || !I.qikinkConfigured());
+    return img && `<item><g:id>${xml(v.sku || `${p.slug}-${v.color}-${v.label}`)}</g:id><g:item_group_id>${xml(p.slug)}</g:item_group_id><g:title>${xml(`${p.name}${v.color ? ' - ' + v.color : ''} - ${v.label}`)}</g:title><g:description>${xml((p.description || p.name).slice(0, 4900))}</g:description><g:link>${xml(productLink(p) + (v.color ? '&c=' + encodeURIComponent(v.color) : ''))}</g:link><g:image_link>${xml(img)}</g:image_link><g:availability>${ok ? 'in_stock' : 'out_of_stock'}</g:availability><g:price>${(v.price || p.price).toFixed(2)} ${xml(db.settings.currency)}</g:price><g:brand>THRYFTLY</g:brand><g:condition>new</g:condition>${p.googleCategory ? `<g:google_product_category>${xml(p.googleCategory)}</g:google_product_category>` : ''}${v.color ? `<g:color>${xml(v.color)}</g:color>` : ''}<g:size>${xml(v.label)}</g:size><g:gender>unisex</g:gender><g:age_group>adult</g:age_group><g:identifier_exists>no</g:identifier_exists></item>`;
+  })).filter(Boolean);
+  feedCache(res).type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title>THRYFTLY</title><link>${xml(siteUrl())}</link><description>THRYFTLY products</description>\n${items.join('\n')}\n</channel></rss>\n`);
+});
+
+/* ---------------- hourly jobs: shipping emails + abandoned-checkout reminders ---------------- */
+// Netlify runs this from netlify/functions/hourly.mjs; a long-lived server runs it when RUN_JOBS=1.
+export async function hourly() {
+  const release = await S.lock();
+  try {
+    await S.load();
+    const synced = await syncQikink().catch(e => (console.error('qikink sync', e.message), 0));
+    // A checkout that was started but never paid, 1–72 hours ago: one reminder, only for the latest
+    // attempt by that email, and not if they've ordered since. At most 20 an hour (Gmail's limits).
+    const now = Date.now(), at = o => Date.parse(o.createdAt);
+    const due = db.orders.filter(o => o.status === 'created' && !o.reminded && now - at(o) > 3600e3 && now - at(o) < 72 * 3600e3).slice(0, 20);
+    let reminded = 0;
+    for (const o of due) {
+      o.reminded = true;
+      const email = o.customer.email.toLowerCase();
+      if (db.orders.some(x => x !== o && x.customer.email.toLowerCase() === email && at(x) > at(o))) continue;
+      const url = `${siteUrl()}/checkout.html?restore=${o.id}.${token('cart:' + o.id)}`;
+      if (await M.send(o.customer.email, M.cartReminder({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg, url, db.settings.reminderCode))) reminded++;
+    }
+    await save();
+    return { synced, reminded };
+  } finally { release(); }
+}
 
 /* ---------------- AI try-on (local Ollama) ---------------- */
 app.get('/api/tryon/status', wrap(async (req, res) => res.json(await I.ollamaStatus())));
@@ -330,7 +462,7 @@ app.post('/api/admin/login', rateLimit({ windowMs: 15 * 60e3, limit: 10 }), (req
 app.post('/api/admin/logout', (req, res) => { res.clearCookie('th_admin', { path: '/' }); res.json({ ok: true }); });
 app.use('/api/admin', (req, res, next) => (isAdmin(req) ? next() : fail(res, 401, 'Not signed in')), admin);
 
-admin.get('/me', (req, res) => res.json({ ok: true, qikink: I.qikinkConfigured(), razorpay: I.razorpayConfigured(), qikinkBase: process.env.QIKINK_BASE_URL || 'https://sandbox.qikink.com' }));
+admin.get('/me', (req, res) => res.json({ ok: true, qikink: I.qikinkConfigured(), razorpay: I.razorpayConfigured(), mail: M.mailOn(), qikinkBase: process.env.QIKINK_BASE_URL || 'https://sandbox.qikink.com' }));
 
 /* settings: only keys that exist in the seed, coerced to the same type */
 admin.get('/settings', (req, res) => res.json(db.settings));
@@ -395,6 +527,7 @@ function readProduct(b, prev = {}) {
     // 3D viewer: which garment model ('' = from the category) and optional original print files.
     model3d: ['tee', 'hoodie', 'sweatshirt', 'none'].includes(b.model3d) ? b.model3d : '',
     printFront: imgUrl(b.printFront), printBack: imgUrl(b.printBack),
+    sizeChart: str(b.sizeChart, 30), seoTitle: str(b.seoTitle, 70), seoDescription: str(b.seoDescription, 320), googleCategory: str(b.googleCategory, 10),
     featured: !!b.featured, inRotation: !!b.inRotation, active: !!b.active, sort: num(b.sort, -1e4, 1e4),
     qikink: prev.qikink, // set by the CSV import, read-only here
   };
@@ -439,7 +572,7 @@ admin.post('/upload', upload.single('file'), wrap(async (req, res) => {
 
 /* orders, subscribers, Qikink */
 admin.get('/overview', (req, res) => {
-  const paid = db.orders.filter(o => o.paidAt), since = t => paid.filter(o => Date.parse(o.paidAt) >= t);
+  const paid = db.orders.filter(o => o.paidAt && o.status !== 'refunded'), since = t => paid.filter(o => Date.parse(o.paidAt) >= t);
   const day = new Date(); day.setHours(0, 0, 0, 0);
   const sum = os => ({ orders: os.length, revenue: os.reduce((t, o) => t + o.amount, 0) });
   const live = db.products.filter(p => p.active);
@@ -464,19 +597,96 @@ admin.get('/qikink/orders', wrap(async (req, res) => res.json(await I.qikinkOrde
 
 // Pull status + tracking for orders we've sent. Qikink pages at 10, so ask in chunks of 10.
 admin.post('/orders/sync', wrap(async (req, res) => {
-  const open = db.orders.filter(o => o.qikink?.order_id && !['Delivered', 'Cancelled', 'Returned'].includes(o.qikinkStatus));
-  for (let i = 0; i < open.length; i += 10) {
-    const chunk = open.slice(i, i + 10);
-    for (const q of await I.qikinkOrders({ ids: chunk.map(o => o.qikink.order_id).join(',') })) {
-      const o = chunk.find(o => String(o.qikink.order_id) === String(q.order_id));
-      if (!o) continue;
-      o.qikinkStatus = q.status;
-      o.tracking = q.shipping?.tracking_link ? { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name } : o.tracking;
-    }
-  }
+  const synced = await syncQikink();
   save();
-  res.json({ synced: open.length });
+  res.json({ synced });
 }));
+
+// Cancel + full refund through Razorpay, then tell the customer. (If Qikink already has the order,
+// cancel it in the Qikink dashboard too: its API has no cancel.)
+admin.post('/orders/:id/refund', wrap(async (req, res) => {
+  const o = db.orders.find(o => o.id === req.params.id);
+  if (!o) return fail(res, 404, 'not found');
+  if (!o.paymentId || o.status === 'refunded') return fail(res, 400, o.status === 'refunded' ? 'Already refunded' : 'This order was never paid');
+  const amount = Math.min(o.amount, num(req.body.amount) || o.amount);
+  const r = await I.razorpayRefund(o.paymentId, amount);
+  o.status = 'refunded';
+  o.refund = { id: r.id, amount, at: new Date().toISOString() };
+  save();
+  await mailOrder(o.customer.email, M.orderRefunded, o);
+  res.json(o);
+}));
+
+/* discounts */
+function readDiscount(b, prev = {}) {
+  const code = str(b.code, 30).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  if (!code) throw new Error('Give the code a name, e.g. WELCOME10');
+  if (db.discounts.some(d => d.code === code && d.id !== prev.id)) throw new Error('That code already exists');
+  const type = ['percent', 'flat', 'freeship'].includes(b.type) ? b.type : 'percent';
+  const when = v => { const t = Date.parse(v); return isNaN(t) ? '' : new Date(t).toISOString(); };
+  return { ...prev, code, type, value: type === 'percent' ? num(b.value, 0, 100) : num(b.value), minOrder: num(b.minOrder), limit: Math.floor(num(b.limit)), oncePerCustomer: !!b.oncePerCustomer,
+    startsAt: when(b.startsAt), endsAt: when(b.endsAt), active: !!b.active, used: prev.used || 0, note: str(b.note, 120) };
+}
+admin.get('/discounts', (req, res) => res.json(db.discounts));
+admin.post('/discounts', (req, res) => { try { const d = readDiscount(req.body, { id: id() }); db.discounts.push(d); save(); res.json(d); } catch (e) { fail(res, 400, e.message); } });
+admin.put('/discounts/:id', (req, res) => {
+  const i = db.discounts.findIndex(d => d.id === req.params.id);
+  if (i < 0) return fail(res, 404, 'not found');
+  try { db.discounts[i] = readDiscount(req.body, db.discounts[i]); save(); res.json(db.discounts[i]); } catch (e) { fail(res, 400, e.message); }
+});
+admin.delete('/discounts/:id', (req, res) => { db.discounts = db.discounts.filter(d => d.id !== req.params.id); save(); res.json({ ok: true }); });
+
+/* size charts: one per kind of garment, picked on each product */
+function readChart(b, prev = {}) {
+  const key = str(b.key || b.title, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (!key) throw new Error('Give the size chart a name');
+  if (db.sizeCharts.some(c => c.key === key && c.id !== prev.id)) throw new Error('Another size chart already uses that key');
+  return { ...prev, key, title: str(b.title || key, 40).toUpperCase(), image: imgUrl(b.image), note: str(b.note, 2000) };
+}
+admin.get('/size-charts', (req, res) => res.json(db.sizeCharts.map(c => ({ ...c, products: db.products.filter(p => p.sizeChart === c.key).length }))));
+admin.post('/size-charts', (req, res) => { try { const c = readChart(req.body, { id: id() }); db.sizeCharts.push(c); save(); res.json(c); } catch (e) { fail(res, 400, e.message); } });
+admin.put('/size-charts/:id', (req, res) => {
+  const i = db.sizeCharts.findIndex(c => c.id === req.params.id);
+  if (i < 0) return fail(res, 404, 'not found');
+  const was = db.sizeCharts[i].key;
+  try {
+    db.sizeCharts[i] = readChart(req.body, db.sizeCharts[i]);
+    if (was !== db.sizeCharts[i].key) db.products.forEach(p => { if (p.sizeChart === was) p.sizeChart = db.sizeCharts[i].key; });
+    save(); res.json(db.sizeCharts[i]);
+  } catch (e) { fail(res, 400, e.message); }
+});
+admin.delete('/size-charts/:id', (req, res) => { db.sizeCharts = db.sizeCharts.filter(c => c.id !== req.params.id); save(); res.json({ ok: true }); });
+
+/* customers: everyone who ordered, has an account, or is on the drop list */
+admin.get('/customers', wrap(async (req, res) => {
+  const by = new Map();
+  const get = email => { const e = String(email || '').toLowerCase(); if (!by.has(e)) by.set(e, { email: e, name: '', phone: '', city: '', orders: 0, spent: 0, last: '', account: false, subscribed: false }); return by.get(e); };
+  for (const o of db.orders) {
+    if (!o.paidAt) continue;
+    const c = get(o.customer.email);
+    Object.assign(c, { name: o.customer.name, phone: o.customer.phone, city: o.customer.city });
+    c.orders++; c.spent += o.status === 'refunded' ? 0 : o.amount;
+    if (o.createdAt > c.last) c.last = o.createdAt;
+  }
+  for (const s of db.subscribers) get(s.email).subscribed = true;
+  let accounts = [];
+  try { accounts = await S.listUsers(); } catch (e) { console.error('list users', e.message); }
+  for (const u of accounts) if (u.email) { const c = get(u.email); c.account = true; c.since = u.created_at; }
+  res.json([...by.values()].filter(c => c.email).sort((a, b) => b.spent - a.spent || String(b.last).localeCompare(String(a.last))));
+}));
+admin.post('/test-email', wrap(async (req, res) => {
+  if (!M.mailOn()) return fail(res, 400, 'Email is not set up: add SMTP_USER and SMTP_PASS');
+  const ok = await M.send(M.ownerEmail(), M.welcomeAccount(M.ownerEmail(), db.settings.welcomeCode));
+  ok ? res.json({ to: M.ownerEmail() }) : fail(res, 502, 'Sending failed. Check SMTP_USER / SMTP_PASS (a Gmail App Password, not your normal password).');
+}));
+
+// Every size-chart kind a product points at gets an entry (image/table filled in under Admin → Size charts).
+const CHART_NAMES = { terry: 'TERRY TEE', ohoodie: 'OVERSIZED HOODIE', hoodie: 'HOODIE', zipper: 'ZIP HOODIE', osweatshirt: 'OVERSIZED SWEATSHIRT', oshirt: 'OVERSIZED SHIRT', classic: 'CLASSIC TEE', 'acid-wash': 'ACID WASH TEE' };
+function ensureSizeCharts() {
+  for (const key of new Set(db.products.map(p => p.sizeChart).filter(Boolean))) {
+    if (!db.sizeCharts.some(c => c.key === key)) db.sizeCharts.push({ id: id(), key, title: CHART_NAMES[key] || key.toUpperCase().replace(/-/g, ' '), image: '', note: '' });
+  }
+}
 
 // Shopify's Type column is often empty, so file products by what their title says.
 // Shopify's own taxonomy ("… > Clothing Tops > Hoodies") wins; the title is the fallback.
@@ -551,6 +761,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
       sizes: variants, colorImages: Object.fromEntries(Object.entries(r.colorImages).map(([c, u]) => [c, L(u)])),
       colorBacks: Object.fromEntries(Object.entries(r.colorBacks).map(([c, u]) => [c, L(u)])),
       images: { front, back, detail, onBody }, shopify: { handle: r.handle, status: r.status },
+      sizeChart: r.sizeChart.replace(/[^a-z0-9]+/g, '-'), googleCategory: r.googleCategory, seoTitle: r.seoTitle.slice(0, 70), seoDescription: r.seoDescription.slice(0, 320),
     };
     if (prev) {
       Object.assign(prev, fields);
@@ -564,6 +775,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
       added++;
     }
   }
+  ensureSizeCharts();
   // The 3D ring reads best with ~6 pieces: fill empty slots with the first live imports.
   for (const p of db.products.filter(p => p.shopify && p.active && !p.inRotation)) {
     if (db.products.filter(p => p.active && p.inRotation).length >= 6) break;
@@ -834,5 +1046,6 @@ app.use((err, req, res, next) => {
   fail(res, err.status || (err instanceof multer.MulterError ? 400 : 500), err instanceof multer.MulterError || err.message?.startsWith('Use ') ? err.message : 'Something went wrong');
 });
 
+if (!LAMBDA && process.env.RUN_JOBS === '1') setInterval(() => hourly().then(r => console.log('hourly', r), e => console.error('hourly', e)), 3600e3);
 if (!LAMBDA) app.listen(PORT, () => console.log(`THRYFTLY server on http://localhost:${PORT} (${PROD ? 'production' : 'dev'}, data in ${S.remote ? 'Supabase' : DATA_DIR})`));
 export default app;

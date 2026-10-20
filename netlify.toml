@@ -9,7 +9,7 @@
   NODE_VERSION = "20"
   # Settings that aren't secrets and whose values also appear in the code/docs (URLs, ports, model
   # names). Without this, Netlify's secret scan fails the build when any of them is set in the UI.
-  SECRETS_SCAN_OMIT_KEYS = "PORT,DATA_DIR,NODE_ENV,OLLAMA_URL,OLLAMA_MODEL,QIKINK_BASE_URL,SUPABASE_URL,SITE_URL"
+  SECRETS_SCAN_OMIT_KEYS = "PORT,DATA_DIR,NODE_ENV,OLLAMA_URL,OLLAMA_MODEL,QIKINK_BASE_URL,SUPABASE_URL,SITE_URL,SUPABASE_PUBLISHABLE_KEY,SMTP_HOST,SMTP_PORT,SMTP_USER,MAIL_FROM,OWNER_EMAIL,RUN_JOBS"
 
 [functions]
   directory = "netlify/functions"
@@ -26,6 +26,117 @@
   to = "/.netlify/functions/api/wp-json/:splat"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/sitemap.xml"
+  to = "/.netlify/functions/api/api/sitemap.xml"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/robots.txt"
+  to = "/.netlify/functions/api/api/robots.txt"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/feeds/google.xml"
+  to = "/.netlify/functions/api/api/feeds/google.xml"
+  status = 200
+  force = true
+
+# ---- Old Shopify links keep working (and keep their Google ranking): 301s to the new pages ----
+# Product slugs were imported from the Shopify handles, so /products/<handle> maps 1:1.
+[[redirects]]
+  from = "/products/:handle"
+  to = "/product.html?p=:handle"
+  status = 301
+
+[[redirects]]
+  from = "/collections/:collection/products/:handle"
+  to = "/product.html?p=:handle"
+  status = 301
+
+[[redirects]]
+  from = "/collections/*"
+  to = "/shop.html"
+  status = 301
+
+[[redirects]]
+  from = "/collections"
+  to = "/shop.html"
+  status = 301
+
+[[redirects]]
+  from = "/search"
+  to = "/shop.html"
+  status = 301
+
+[[redirects]]
+  from = "/cart"
+  to = "/checkout.html"
+  status = 301
+
+[[redirects]]
+  from = "/account/*"
+  to = "/account.html"
+  status = 301
+
+[[redirects]]
+  from = "/account"
+  to = "/account.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/contact"
+  to = "/contact.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/contact-us"
+  to = "/contact.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/about"
+  to = "/about.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/about-us"
+  to = "/about.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/*"
+  to = "/"
+  status = 301
+
+[[redirects]]
+  from = "/policies/shipping-policy"
+  to = "/policy.html?p=shipping"
+  status = 301
+
+[[redirects]]
+  from = "/policies/refund-policy"
+  to = "/policy.html?p=returns"
+  status = 301
+
+[[redirects]]
+  from = "/policies/privacy-policy"
+  to = "/policy.html?p=privacy"
+  status = 301
+
+[[redirects]]
+  from = "/policies/terms-of-service"
+  to = "/policy.html?p=terms"
+  status = 301
+
+# Shopify discount links (/discount/WELCOME10) pre-fill the code at checkout.
+[[redirects]]
+  from = "/discount/:code"
+  to = "/shop.html?discount=:code"
+  status = 302
 
 # /uploads/* → Supabase Storage is written to dist/_redirects at build time (tools/netlify-redirects.js),
 # because it needs SUPABASE_URL.

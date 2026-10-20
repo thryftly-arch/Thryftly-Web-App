@@ -32,7 +32,8 @@ const keep = j => {
 
 export const signIn = async (email, password) => keep(await gotrue('/token?grant_type=password', { body: { email, password } }));
 // With "Confirm email" on in Supabase there's no session yet: the caller tells them to check their inbox.
-export const signUp = async (email, password) => keep(await gotrue('/signup', { body: { email, password } }));
+// redirect_to: the confirm link brings them back here (Supabase falls back to its Site URL otherwise).
+export const signUp = async (email, password) => keep(await gotrue('/signup?redirect_to=' + encodeURIComponent(location.origin + '/account.html'), { body: { email, password } }));
 export const sendReset = email => gotrue('/recover?redirect_to=' + encodeURIComponent(location.origin + '/account.html'), { body: { email } });
 export async function setPassword(password) { await gotrue('/user', { method: 'PUT', body: { password }, token: await token() }); }
 export async function signOut() {
