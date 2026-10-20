@@ -210,13 +210,17 @@ export function parseShopifyCsv(text) {
   }
   return [...byHandle.values()].filter(p => p.title).map(p => {
     const ci = p.optionNames.findIndex(n => /colou?r/i.test(n));
-    let si = p.optionNames.findIndex(n => /size/i.test(n));
-    if (si < 0) si = p.optionNames.findIndex((n, i) => n && i !== ci && !/^title$/i.test(n));
+    // Everything that isn't colour becomes the size label; combo packs ("Tee A size", "Tee B size") read "S / M".
+    const rest = p.optionNames.map((n, i) => i).filter(i => i !== ci && p.optionNames[i] && !/^title$/i.test(p.optionNames[i]));
     const variants = p.variants.map(v => ({
       color: ci >= 0 ? v.opts[ci].toUpperCase() : '',
-      label: (si >= 0 && v.opts[si] ? v.opts[si] : 'OS').toUpperCase().replace(/^DEFAULT TITLE$/, 'OS'),
+      label: (rest.map(i => v.opts[i]).filter(Boolean).join(' / ') || 'OS').toUpperCase(),
       sku: v.sku, price: v.price, stock: v.stock, image: v.image,
     }));
+    // Shopify often lists XS last; sort sizes the way people read them, keeping colour order.
+    const rank = l => { const i = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL'].indexOf(l.split(' / ')[0]); return i < 0 ? 99 : i; };
+    const colorOrder = [...new Set(variants.map(v => v.color))];
+    variants.sort((a, b) => colorOrder.indexOf(a.color) - colorOrder.indexOf(b.color) || rank(a.label) - rank(b.label));
     const colorImages = {};
     for (const v of variants) if (v.color && v.image && !colorImages[v.color]) colorImages[v.color] = v.image;
     // Gallery = images in position order, minus the mockups that belong to other colours.

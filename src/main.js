@@ -81,13 +81,17 @@ if (isHome) {
 
   const featured = products.filter(p => p.featured);
   const soldOut = p => !p.sizes.some(z => z.available);
-  const sizeLine = p => [...new Set(p.sizes.filter(z => z.available).map(z => z.label))].join('/') || 'SOLD OUT';
+  const sizeLine = p => {
+    const sizes = [...new Set(p.sizes.filter(z => z.available).map(z => z.label))];
+    return sizes.length > 3 ? `${sizes[0]}–${sizes.at(-1)}` : sizes.join('/') || 'SOLD OUT';
+  };
+  const colorLine = p => { const n = new Set(p.sizes.map(z => z.color).filter(Boolean)).size; return n > 1 ? `${n} COLOURS` : [...new Set(p.sizes.map(z => z.color))][0] || p.color; };
   $('#shop').innerHTML = featured.map((p, i) => `
     <div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${url(p)}">
       <div class="pimg${p.images.front ? ' has-img' : ''}"${imgStyle(p.images.front)}>[ product shot ]${
         soldOut(p) ? '<span class="tag tag-red">SOLD OUT</span>' : p.badge ? `<span class="tag tag-${p.badgeStyle === 'red' ? 'red' : 'yel'}">${esc(p.badge)}</span>` : ''}</div>
       <div class="pinfo"><span class="pname">${esc(p.name)}${p.edition ? ' ' + esc(p.edition.replace('/', '/ ')) : ''}</span>
-      <div class="pmeta"><span>${esc(sizeLine(p))} · ${esc(p.color)}</span><span>${money(p.price)}</span></div></div>
+      <div class="pmeta"><span>${esc([sizeLine(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${money(p.price)}</span></div></div>
     </a></div>`).join('');
 
   $('.m-strip').innerHTML = featured.map((p, i) => `
@@ -126,6 +130,7 @@ if (isProduct) {
   $('.p-price').textContent = money(p.price);
   $('.p-desc').textContent = p.description;
   $('.p-fit').textContent = p.fitLabel;
+  if (!p.fitLabel) $('.sizes-label').textContent = 'SIZE';
   $('.p-tag').textContent = p.tag;
   $('.p-tag').hidden = !p.tag;
   const badge = $('.p-badge');

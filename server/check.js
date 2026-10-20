@@ -47,4 +47,7 @@ assert.deepEqual(ns.colorImages, { BLACK: 'https://cdn.shopify.com/a.jpg', BONE:
 assert.deepEqual(ns.gallery, ['https://cdn.shopify.com/a.jpg', 'https://cdn.shopify.com/b.jpg']);
 assert.deepEqual(cap.variants.map(v => [v.color, v.label]), [['', 'OS']]);
 assert.equal(cap.status, 'draft');
+const [combo] = I.parseShopifyCsv(`Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Option3 Name,Option3 Value,Variant SKU,Variant Price,Status
+duo,Duo,Tee A (color),Black,Tee A (size),S,Tee B (size),M,qikink-sku-1,1599,active`);
+assert.deepEqual(combo.variants.map(v => [v.color, v.label]), [['BLACK', 'S / M']]);
 console.log('shopify csv checks ok');

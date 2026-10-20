@@ -234,7 +234,7 @@ function readProduct(b, prev = {}) {
     badge: str(b.badge, 20).toUpperCase(), badgeStyle: b.badgeStyle === 'red' ? 'red' : 'yellow', tag: str(b.tag, 40).toUpperCase(),
     color: str(b.color, 40).toUpperCase(), fitLabel: str(b.fitLabel, 40).toUpperCase(), description: str(b.description, 2000),
     ringLabel: str(b.ringLabel, 40),
-    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 10).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0 })).filter(s => s.label),
+    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 12).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0 })).filter(s => s.label),
     colorImages: Object.fromEntries(Object.entries(b.colorImages || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
     images: Object.fromEntries(['front', 'back', 'detail', 'onBody'].map(k => [k, imgUrl(b.images?.[k])])),
@@ -298,7 +298,11 @@ admin.post('/orders/sync', wrap(async (req, res) => {
 // Shopify → our store. Images are copied to our own disk, since Shopify's CDN goes away with the store.
 async function downloadImage(url) {
   if (!/^https:\/\//.test(url)) return '';
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  // Shopify's CDN resizes on request; 1600px keeps mockups sharp.
+  const u = new URL(url);
+  if (u.hostname === 'cdn.shopify.com') u.searchParams.set('width', '1600');
+  // Asking for WebP gets ~12x smaller files with transparency intact.
+  const res = await fetch(u, { headers: { Accept: 'image/webp,image/*' }, signal: AbortSignal.timeout(30000) });
   const type = (res.headers.get('content-type') || '').split(';')[0];
   if (!res.ok || !EXT[type]) return '';
   const buf = Buffer.from(await res.arrayBuffer());
@@ -332,8 +336,9 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
   for (const r of rows) {
     const name = r.title.toUpperCase().slice(0, 80);
     let slug = r.handle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const prev = db.products.find(p => p.slug === slug || p.name === name);
-    const variants = r.variants.map(v => ({ label: v.label.slice(0, 10), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
+    // Match on the Shopify handle only: several Shopify products share a title.
+    const prev = db.products.find(p => p.shopify?.handle === r.handle) || db.products.find(p => !p.shopify && p.slug === slug);
+    const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
     const [front = '', back = '', detail = '', onBody = ''] = r.gallery.map(L);
     const fields = {
       name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || prev?.category || 'APPAREL').toUpperCase().slice(0, 40),
@@ -347,13 +352,19 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
       while (db.products.some(p => p.slug === slug)) slug += '-2';
       db.products.push({
         id: id(), slug, edition: '', badge: '', badgeStyle: 'yellow', tag: '', color: '', fitLabel: '', specs: [], tryonImage: '',
-        ringLabel: r.title.toLowerCase(), featured: true, inRotation: true, sort: 100 + db.products.length,
+        ringLabel: r.title.toLowerCase(), featured: true, sort: 100 + db.products.length,
         // Go live straight away only if it was live on Shopify and every variant can be fulfilled.
         active: r.status === 'active' && variants.every(v => v.sku),
+        inRotation: false,
         ...fields,
       });
       added++;
     }
+  }
+  // The 3D ring reads best with ~6 pieces: fill empty slots with the first live imports.
+  for (const p of db.products.filter(p => p.shopify && p.active && !p.inRotation)) {
+    if (db.products.filter(p => p.active && p.inRotation).length >= 6) break;
+    p.inRotation = true;
   }
   save();
   res.json({ added, updated, images: urls.length - failed, imagesFailed: failed });
