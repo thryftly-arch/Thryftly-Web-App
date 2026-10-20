@@ -62,12 +62,24 @@ Netlify serves the pages from `dist/` and runs the API as one function (`netlify
 | `SESSION_SECRET` | a random 96-character string (the one in your local `.env`) |
 | `SUPABASE_URL` | from step 1 |
 | `SUPABASE_SECRET_KEY` | from step 1 |
+| `SUPABASE_PUBLISHABLE_KEY` | from step 1 (`sb_publishable_…`): turns on customer accounts |
 | `SITE_URL` | `https://your-domain`, no trailing slash |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Razorpay dashboard |
 | `QIKINK_BASE_URL`, `QIKINK_CLIENT_ID`, `QIKINK_CLIENT_SECRET` | Qikink dashboard (live: `https://api.qikink.com`) |
 
 3. Deploy. Then in Razorpay, point the webhook to `https://your-domain/api/webhooks/razorpay`.
 4. Open `https://your-domain/admin` and sign in with `ADMIN_PASSWORD`. To change the password, edit the variable in Netlify and redeploy.
+
+**4. Customer accounts (Supabase Auth)**
+Customers sign in on `/account.html` with email and password. Supabase stores and checks the passwords; this site never sees them. Signed-in customers get their saved pieces on every device and a list of their orders with a **Reorder** button. Orders placed while signed in are linked to the account. Earlier guest orders show up too, once the customer has confirmed their email.
+1. In Supabase, open **Authentication → URL Configuration**. Set **Site URL** to your site address and add `https://your-domain/account.html` and `http://localhost:5173/account.html` under **Redirect URLs**.
+2. **Emails.** Supabase's built-in mailer only sends to your own team's addresses and only a few per hour, so customers won't receive confirmation or reset emails until you add your own SMTP. Go to **Authentication → Emails → SMTP Settings**; the free tiers of Resend or Brevo work. Until then, turn **Confirm email** off (**Authentication → Sign In / Providers → Email**) so people can sign up and sign in straight away. Note that "forgot password" won't deliver without SMTP.
+3. Optional later: **Google sign-in** is a provider switch in the same place.
+
+**5. Speed**
+- Product data is cached at Netlify's edge for a minute and refreshed in the background, so pages don't wait on the function or the database. Admin saves clear that cache straight away.
+- Images load straight from Supabase's CDN.
+- In Netlify, go to **Site configuration → Functions → Region** and pick **Mumbai (ap-south-1)**, next to the Supabase database, if your plan offers it. The default region is in the US, which adds about 0.5 s every time the function talks to the database.
 
 What's different on Netlify:
 - **Shopify import is turned off.** It copies images for minutes, and a Netlify function stops after about 10 seconds. Run imports from your computer with the Supabase lines in `.env` (`npm run dev` → `localhost:5173/admin`); they land straight in the live shop. Adding and editing products, image uploads (up to about 5 MB each), drops, pages and orders all work on the live site.

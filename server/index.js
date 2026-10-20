@@ -38,7 +38,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-      connectSrc: ["'self'", 'https://*.razorpay.com'],
+      connectSrc: ["'self'", 'https://*.razorpay.com', 'https://*.supabase.co'],
       frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
       mediaSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: PROD ? [] : null,
@@ -53,6 +53,21 @@ const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
 const num = (v, min = 0, max = 1e7) => Math.min(max, Math.max(min, Number(v) || 0));
 const imgUrl = v => { const s = str(v, 500); return s.startsWith('/uploads/') || s.startsWith('https://') ? s : ''; };
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// Public catalogue responses: with Supabase, image paths point straight at Supabase's CDN
+// (no hop through this server or Netlify).
+const pubJson = (res, v) => (S.remote ? res.type('application/json').send(JSON.stringify(v).replaceAll('"/uploads/', '"' + S.fileUrl(''))) : res.json(v));
+// Netlify's edge keeps public catalogue responses for a minute and serves the old copy instantly while
+// it fetches a new one, so a page rarely waits on the function. Admin saves purge it (purgeSite).
+const edgeCache = res => res.set({ 'Cache-Control': 'public, max-age=0, must-revalidate', 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=60, stale-while-revalidate=604800', 'Netlify-Cache-Tag': 'site' });
+// Netlify injects SITE_ID and NETLIFY_PURGE_API_TOKEN into functions; elsewhere this does nothing.
+function purgeSite() {
+  if (!process.env.NETLIFY_PURGE_API_TOKEN || !process.env.SITE_ID) return Promise.resolve();
+  return fetch('https://api.netlify.com/api/v1/purge', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.NETLIFY_PURGE_API_TOKEN },
+    body: JSON.stringify({ site_id: process.env.SITE_ID, cache_tags: ['site'] }), signal: AbortSignal.timeout(5000),
+  }).catch(e => console.error('purge failed', e.message));
+}
 
 const publicProduct = p => ({
   slug: p.slug, name: p.name, edition: p.edition, price: p.price, category: p.category, badge: p.badge, badgeStyle: p.badgeStyle,
@@ -76,7 +91,7 @@ const lockedUntil = id => {
 // Reads use data at most 5s old. A write waits its turn, reloads, and its reply is held until the save lands,
 // so nothing is lost when Netlify freezes the function after replying.
 app.use(['/api', '/wp-json'], wrap(async (req, res, next) => {
-  if (!S.remote) return next();
+  if (!S.remote || req.originalUrl.startsWith('/api/account/wishlist')) return next();
   const json = res.json.bind(res);
   res.json = body => {
     const p = S.flush();
@@ -90,6 +105,8 @@ app.use(['/api', '/wp-json'], wrap(async (req, res, next) => {
   }
   const release = await S.lock();
   res.once('finish', release); res.once('close', release);
+  // Catalogue changes (admin, Qikink pushes, stock after a sale) should show up now, not in a minute.
+  if (/^\/(api\/admin|wp-json|api\/webhooks|api\/checkout\/verify)/.test(req.originalUrl) && !req.originalUrl.startsWith('/api/admin/login')) res.once('finish', purgeSite);
   try { await S.load(); } catch (e) { release(); throw e; }
   next();
 }));
@@ -112,12 +129,16 @@ app.use(express.json({ limit: '12mb' })); // try-on photos come in as base64
 app.get('/api/site', (req, res) => {
   const slugOf = Object.fromEntries(db.products.filter(p => p.active).map(p => [p.id, p.slug]));
   const drops = liveDrops().map(d => ({ id: d.id, name: d.name, tagline: d.tagline, description: d.description, banner: d.banner, startsAt: d.startsAt, endsAt: d.endsAt, products: d.productIds.map(i => slugOf[i]).filter(Boolean) }));
-  res.json({ settings: db.settings, pages: db.pages, drops, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured() });
+  const auth = S.remote && process.env.SUPABASE_PUBLISHABLE_KEY ? { url: process.env.SUPABASE_URL.replace(/\/+$/, ''), key: process.env.SUPABASE_PUBLISHABLE_KEY } : null;
+  edgeCache(res);
+  pubJson(res, { settings: db.settings, pages: db.pages, drops, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured(), auth });
 });
 
 app.get('/api/products/:slug', (req, res) => {
   const p = activeProducts().find(p => p.slug === req.params.slug);
-  p ? res.json(publicProduct(p)) : fail(res, 404, 'not found');
+  if (!p) return fail(res, 404, 'not found');
+  edgeCache(res);
+  pubJson(res, publicProduct(p));
 });
 
 app.post('/api/subscribe', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), (req, res) => {
@@ -197,11 +218,13 @@ app.post('/api/checkout', rateLimit({ windowMs: 15 * 60e3, limit: 30 }), wrap(as
   if (!I.razorpayConfigured()) return fail(res, 503, 'Payments are not set up yet');
   let cart, customer;
   try { cart = priceCart(req.body.items); customer = readCustomer(req.body.customer); } catch (e) { return fail(res, 400, e.message); }
+  const user = await S.authUser(bearer(req));
   const order = {
     id: id(),
     number: 'th' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex'), // 14 chars, Qikink allows 15
     items: cart.lines, subtotal: cart.subtotal, shipping: cart.shipping, amount: cart.amount,
     currency: db.settings.currency, customer, status: 'created', createdAt: new Date().toISOString(),
+    ...(user && { userId: user.id }),
   };
   const rp = await I.razorpayCreateOrder({ amount: order.amount, currency: order.currency, receipt: order.number });
   order.razorpayOrderId = rp.id;
@@ -244,6 +267,35 @@ async function fulfill(order) {
   }
   save();
 }
+
+/* ---------------- customer accounts ---------------- */
+const bearer = req => /^Bearer (.+)$/.exec(req.get('authorization') || '')?.[1] || '';
+const needUser = wrap(async (req, res, next) => {
+  req.user = await S.authUser(bearer(req));
+  req.user ? next() : fail(res, 401, 'Sign in again');
+});
+// A customer's orders: placed while signed in, or (once their email is confirmed) guest orders to that email.
+const mine = u => db.orders.filter(o => o.status !== 'created' && (o.userId === u.id || (u.verified && o.customer.email.toLowerCase() === u.email)));
+app.get('/api/account', needUser, (req, res) => {
+  const byId = Object.fromEntries(db.products.map(p => [p.id, p]));
+  const orders = mine(req.user).reverse().map(o => ({
+    number: o.number, placed: o.createdAt, amount: o.amount,
+    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(),
+    tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
+    items: o.items.map(i => { const p = byId[i.productId]; return { slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: p ? p.colorImages?.[i.color] || p.images.front : '' }; }),
+  }));
+  res.set('Cache-Control', 'private, no-store');
+  pubJson(res, { email: req.user.email, verified: req.user.verified, orders });
+});
+app.get('/api/account/wishlist', needUser, wrap(async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ slugs: (await S.getRow('wishlists', req.user.id))?.slugs || [] });
+}));
+app.put('/api/account/wishlist', rateLimit({ windowMs: 60e3, limit: 60 }), needUser, wrap(async (req, res) => {
+  const slugs = [...new Set((Array.isArray(req.body.slugs) ? req.body.slugs : []).map(s => str(s, 80)).filter(s => /^[a-z0-9-]+$/.test(s)))].slice(0, 200);
+  await S.putRow('wishlists', req.user.id, { slugs, at: new Date().toISOString() });
+  res.json({ slugs });
+}));
 
 /* ---------------- AI try-on (local Ollama) ---------------- */
 app.get('/api/tryon/status', wrap(async (req, res) => res.json(await I.ollamaStatus())));
@@ -453,6 +505,7 @@ async function downloadImage(url) {
 
 // Copy a remote image once; later imports of the same URL reuse the file. Failures keep the remote URL.
 async function localImage(url) {
+  if (S.remote && !db.importedImages) db.importedImages = (await S.getRow('doc', 'importedImages')) || {};
   const have = db.importedImages?.[url];
   if (have && (S.remote || fs.existsSync(path.join(UPLOAD_DIR, path.basename(have))))) return have;
   const got = await downloadImage(url).catch(() => '');

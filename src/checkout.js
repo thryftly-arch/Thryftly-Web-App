@@ -1,4 +1,5 @@
 import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome } from './shop.js';
+import { token, session } from './auth.js';
 
 const site = await loadSite();
 mountChrome();
@@ -10,6 +11,7 @@ const msg = (t, err) => { const m = $('.co-msg'); m.textContent = t; m.classList
 // Remember the address on this device only.
 const ADDR = 'thryftly_addr';
 try { const a = JSON.parse(localStorage.getItem(ADDR)) || {}; for (const [k, v] of Object.entries(a)) if (form[k]) form[k].value = v; } catch { /* ignore */ }
+if (!form.email.value && session()?.email) form.email.value = session().email;
 
 async function render() {
   const items = getCart().filter(i => bySlug[i.slug]);
@@ -68,7 +70,9 @@ form.addEventListener('submit', async e => {
   pay.disabled = true;
   msg('OPENING SECURE PAYMENT…');
   try {
-    const [order] = await Promise.all([api('/api/checkout', { items: getCart(), customer }), loadRazorpay()]);
+    // Signed in: the order is saved to the account (Account → Orders, one-tap reorder).
+    const t = await token();
+    const [order] = await Promise.all([api('/api/checkout', { items: getCart(), customer }, t ? { Authorization: 'Bearer ' + t } : {}), loadRazorpay()]);
     new window.Razorpay({
       key: order.key,
       order_id: order.razorpayOrderId,

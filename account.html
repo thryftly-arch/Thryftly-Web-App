@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account — THRYFTLY</title>
+  <meta name="description" content="Your THRYFTLY account: saved pieces and orders.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body data-page="account">
+  <header class="nav" data-chrome></header>
+
+  <!-- Signed out: sign in / create account / forgot password -->
+  <main class="page page-split acct-out" hidden>
+    <section>
+      <h1 class="page-h1">YOUR <span class="volt">ACCOUNT.</span></h1>
+      <p class="prose">Sign in to keep your saved pieces on every device, see every order you've placed and reorder in one tap.</p>
+    </section>
+    <form class="co-form acct-form">
+      <div class="acct-tabs" role="tablist">
+        <button type="button" role="tab" data-mode="in" class="on" aria-selected="true">SIGN IN</button>
+        <button type="button" role="tab" data-mode="up" aria-selected="false">CREATE ACCOUNT</button>
+      </div>
+      <input name="email" type="email" placeholder="Email" autocomplete="email" required>
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" minlength="6" required>
+      <button class="btn-red" type="submit">SIGN IN →</button>
+      <button class="acct-link forgot" type="button">FORGOT PASSWORD?</button>
+      <p class="co-msg" aria-live="polite"></p>
+    </form>
+  </main>
+
+  <!-- From the reset email: choose a new password -->
+  <main class="page page-split acct-reset" hidden>
+    <section><h1 class="page-h1">NEW <span class="volt">PASSWORD.</span></h1></section>
+    <form class="co-form reset-form">
+      <h2>CHOOSE A NEW PASSWORD</h2>
+      <input name="password" type="password" placeholder="New password (6+ characters)" autocomplete="new-password" minlength="6" required>
+      <button class="btn-red" type="submit">SAVE PASSWORD →</button>
+      <p class="co-msg" aria-live="polite"></p>
+    </form>
+  </main>
+
+  <!-- Signed in -->
+  <main class="page acct-in" hidden>
+    <div class="acct-top">
+      <h1 class="page-h1">HEY, <span class="volt acct-name"></span></h1>
+      <div class="acct-who"><span class="acct-email"></span><button class="btn-ghost signout" type="button">SIGN OUT</button></div>
+    </div>
+    <p class="co-msg acct-note" aria-live="polite"></p>
+    <section class="acct-sec">
+      <h2 class="cat-h">ORDERS <span class="orders-n"></span></h2>
+      <div class="acct-orders"></div>
+    </section>
+    <section class="acct-sec">
+      <h2 class="cat-h">SAVED <span class="saved-n"></span></h2>
+      <div class="grid acct-saved"></div>
+    </section>
+  </main>
+
+  <footer class="footer" data-chrome></footer>
+  <script type="module" src="/src/account.js"></script>
+</body>
+</html>

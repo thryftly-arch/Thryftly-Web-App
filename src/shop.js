@@ -1,4 +1,5 @@
 // Shared storefront helpers: API, cart, formatting, safe rendering.
+import { setAuthConfig, authOn, signedIn, session, accountApi } from './auth.js';
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
@@ -6,15 +7,18 @@ export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;'
 // Admin-provided URLs are already restricted server-side; this keeps them inert inside CSS url().
 export const cssUrl = u => (u ? `url("${encodeURI(u).replace(/"/g, '%22')}")` : '');
 
-export async function api(path, body) {
-  const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+export async function api(path, body, headers = {}) {
+  const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) } : {});
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || `Request failed (${res.status})`);
   return j;
 }
 
 let site;
-export const loadSite = async () => (site ??= await api('/api/site'));
+export async function loadSite() {
+  if (!site) { site = await api('/api/site'); setAuthConfig(site.auth); }
+  return site;
+}
 export const money = n => site.settings.symbol + (Number.isInteger(+n) ? n : (+n).toFixed(2));
 
 /* ---------- cart (localStorage, can be unavailable) ---------- */
@@ -39,7 +43,7 @@ export function updateCartCount() {
   $$('.saved-count').forEach(c => (c.textContent = getSaved().length));
 }
 
-/* ---------- wishlist + recently viewed (this device only) ---------- */
+/* ---------- wishlist (this device, synced to the account when signed in) + recently viewed ---------- */
 const read = k => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
 export const getSaved = () => read('thryftly_saved');
@@ -47,10 +51,41 @@ export const isSaved = slug => getSaved().includes(slug);
 export function toggleSaved(slug) {
   const list = getSaved(), on = !list.includes(slug);
   write('thryftly_saved', on ? [slug, ...list] : list.filter(s => s !== slug));
-  $$(`.pheart[data-slug="${CSS.escape(slug)}"]`).forEach(b => { b.setAttribute('aria-pressed', on); b.textContent = on ? '♥' : '♡'; });
+  paintSaved();
+  pushSaved();
+  return on;
+}
+function paintSaved() {
+  $$('.pheart[data-slug]').forEach(b => { const on = isSaved(b.dataset.slug); b.setAttribute('aria-pressed', on); b.textContent = on ? '♥' : '♡'; });
   updateCartCount();
   window.dispatchEvent(new CustomEvent('thryftly:saved'));
-  return on;
+}
+let pushT;
+function pushSaved() {
+  if (!signedIn()) return;
+  clearTimeout(pushT);
+  pushT = setTimeout(() => accountApi('/wishlist', { method: 'PUT', body: { slugs: getSaved() } }).catch(() => {}), 500);
+}
+// The first time an account is used on this device, this device's hearts are added to it; after that
+// the account's list is the truth (so removing on the phone removes here too). Once per tab session.
+let syncing = null;
+export function syncSaved(force = false) {
+  if (!signedIn()) return Promise.resolve();
+  try { if (!force && sessionStorage.getItem('thryftly_saved_sync')) return Promise.resolve(); } catch { /* ignore */ }
+  // Overlapping calls (header + account page) share one run, so they can't undo each other's merge.
+  return (syncing ??= doSync().finally(() => { syncing = null; }));
+}
+async function doSync() {
+  try {
+    const { slugs } = await accountApi('/wishlist');
+    const owner = session().email, first = read('thryftly_saved_owner') !== owner;
+    const list = first ? [...new Set([...getSaved(), ...slugs])] : slugs;
+    write('thryftly_saved', list);
+    write('thryftly_saved_owner', owner);
+    if (list.length !== slugs.length) await accountApi('/wishlist', { method: 'PUT', body: { slugs: list } });
+    try { sessionStorage.setItem('thryftly_saved_sync', '1'); } catch { /* ignore */ }
+    paintSaved();
+  } catch { /* offline or signed out: keep the device list */ }
 }
 export const getViewed = () => read('thryftly_viewed');
 export const noteViewed = slug => write('thryftly_viewed', [slug, ...getViewed().filter(s => s !== slug)].slice(0, 12));
@@ -67,10 +102,12 @@ export function mountChrome() {
     <nav class="nav-links" id="nav-links">${NAV.map(([h, l]) => `<a href="${h}"${h.replace('.html', '') === here ? ' class="on" aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
     <div class="nav-right d-only">
       <span class="live"><span class="live-dot"></span><span data-s="liveLabel"></span></span>
+      ${authOn() ? `<a class="acct-btn" href="/account.html">${signedIn() ? 'ACCOUNT' : 'SIGN IN'}</a>` : ''}
       <a class="saved-btn" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡ <span class="saved-count">0</span></a>
       <a class="cart-btn" href="/checkout.html" data-drawer="cart">CART [<span class="cart-count">0</span>]</a>
     </div>
     <div class="nav-mobile m-only">
+      ${authOn() ? `<a class="cart-sq saved-sq acct-sq" href="/account.html" aria-label="${signedIn() ? 'Your account' : 'Sign in'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" fill="none" stroke="currentColor" stroke-width="2.4"/></svg></a>` : ''}
       <a class="cart-sq saved-sq" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡</a>
       <a class="cart-sq" href="/checkout.html" data-drawer="cart" aria-label="Cart"><span class="cart-count">0</span></a>
       <button class="burger" aria-label="Menu" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
@@ -83,7 +120,7 @@ export function mountChrome() {
         <div class="signup-box"><input type="email" placeholder="your@email.com" aria-label="Email" required><button type="submit">SUBSCRIBE</button></div>
       </form>
       <div class="footer-cols">
-        <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a></div>
+        <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a>${authOn() ? '<a href="/account.html">MY ACCOUNT</a>' : ''}</div>
         <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="tiktok" target="_blank" rel="noopener">TIKTOK</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
         <div><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
       </div>
@@ -111,6 +148,7 @@ export function mountChrome() {
     }
     btn.disabled = false;
   });
+  syncSaved();
   // Cart drawer, quick add, page transitions and the cursor ring: loaded once the header exists.
   import('./extras.js').then(m => m.init());
 }

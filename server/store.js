@@ -136,7 +136,8 @@ export async function load(maxAge = 0) {
   if (!remote || (maxAge && Date.now() - loadedAt < maxAge)) return;
   const rows = [];
   for (let off = 0; ; off += 1000) {
-    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}`)).json();
+    // Skipped: per-customer wishlists (read one at a time) and the import bookkeeping (read when importing).
+    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}&coll=neq.wishlists&not.and=(coll.eq.doc,id.eq.importedImages)`)).json();
     rows.push(...page);
     if (page.length < 1000) break;
   }
@@ -191,6 +192,34 @@ export function lock() {
   writers++;
   let done = false;
   return before.then(() => () => { if (!done) { done = true; writers--; release(); } });
+}
+
+/* ---------- single rows, outside db (wishlists, import bookkeeping) ---------- */
+export async function getRow(coll, id) {
+  if (!remote) return db[coll]?.[id] ?? null;
+  const [r] = await (await sb(`/rest/v1/thryftly?select=data&coll=eq.${coll}&id=eq.${encodeURIComponent(id)}`)).json();
+  return r?.data ?? null;
+}
+export async function putRow(coll, id, data) {
+  if (!remote) { (db[coll] ||= {})[id] = data; writeFile(); return; }
+  await sb('/rest/v1/thryftly', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify([{ coll, id, data, updated_at: new Date().toISOString() }]) });
+}
+
+/* ---------- customer sign-in (Supabase Auth) ---------- */
+// The browser signs in with Supabase directly and sends its access token; this checks it with Supabase.
+// Cached a minute per token so a page's few calls cost one check.
+const users = new Map();
+export async function authUser(token) {
+  if (!remote || !token) return null;
+  const hit = users.get(token);
+  if (hit && hit.until > Date.now()) return hit.user;
+  const res = await fetch(SB + '/auth/v1/user', { headers: { apikey: KEY, Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) return null;
+  const u = await res.json();
+  const user = { id: u.id, email: String(u.email || '').toLowerCase(), verified: !!u.email_confirmed_at };
+  if (users.size > 500) users.clear();
+  users.set(token, { user, until: Date.now() + 60e3 });
+  return user;
 }
 
 /* ---------- images ---------- */
