@@ -139,27 +139,62 @@ const current = () => {
   return m;
 };
 
-// Replace db with what's in Supabase. maxAge > 0 skips the reload if the last one is that recent.
-export async function load(maxAge = 0) {
-  if (!remote || (maxAge && Date.now() - loadedAt < maxAge)) return;
+// Bring db up to date with Supabase. A server that's already warm only fetches the rows that changed
+// since its last look (one small request; the database sits far from Netlify's functions, so size matters).
+// Everything is re-read at least once a minute (rows deleted elsewhere drop out then) and after any failed write.
+// maxAge > 0 skips the check if the last one is that recent.
+let fullAt = 0, newest = '';
+const SKIP = '&coll=not.in.(wishlists,customers)&not.and=(coll.eq.doc,id.eq.importedImages)'; // read one at a time / when importing
+async function rowsWhere(filter) {
   const rows = [];
   for (let off = 0; ; off += 1000) {
-    // Skipped: per-customer rows (wishlists, customers: read one at a time) and the import bookkeeping (read when importing).
-    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data&order=coll,id&limit=1000&offset=${off}&coll=not.in.(wishlists,customers)&not.and=(coll.eq.doc,id.eq.importedImages)`)).json();
+    const page = await (await sb(`/rest/v1/thryftly?select=coll,id,data,updated_at&order=coll,id&limit=1000&offset=${off}${SKIP}${filter}`)).json();
     rows.push(...page);
-    if (page.length < 1000) break;
+    if (page.length < 1000) return rows;
   }
+}
+const noteNewest = rows => { for (const r of rows) if (r.updated_at > newest) newest = r.updated_at; };
+const sortLists = () => {
+  const by = k => (a, b) => String(a[k]).localeCompare(String(b[k]));
+  db.orders.sort(by('createdAt')); db.messages.sort(by('at')); db.subscribers.sort(by('at'));
+};
+// Forget the warm copy: the next load reads everything again.
+export const invalidate = () => { fullAt = 0; };
+
+export async function load(maxAge = 0) {
+  if (!remote || (maxAge && Date.now() - loadedAt < maxAge)) return;
+  if (fullAt && Date.now() - fullAt < 60e3 && newest) {
+    // Clocks on different servers drift a little: look 5 s further back and re-apply what's unchanged.
+    const since = new Date(Date.parse(newest) - 5000).toISOString();
+    const rows = await rowsWhere(`&updated_at=gte.${encodeURIComponent(since)}`);
+    for (const r of rows) {
+      const key = `${r.coll}/${r.id}`, json = JSON.stringify(r.data);
+      if (snap.get(key) === json) continue;
+      if (r.coll === 'doc') db[r.id] = r.data;
+      else if (db[r.coll]) {
+        const i = db[r.coll].findIndex(x => rowId(r.coll, x) === r.id);
+        i < 0 ? db[r.coll].push(r.data) : (db[r.coll][i] = r.data);
+      }
+      snap.set(key, json);
+    }
+    noteNewest(rows);
+    if (rows.length) { sortLists(); migrate(); }
+    loadedAt = Date.now();
+    return;
+  }
+  const rows = await rowsWhere('');
   for (const k of Object.keys(db)) delete db[k];
   if (!rows.some(r => r.coll === 'doc' && r.id === 'settings')) Object.assign(db, SEED()); // empty project: start from the seed
   else {
     for (const c of ROWS) db[c] = [];
     for (const r of rows) r.coll === 'doc' ? (db[r.id] = r.data) : db[r.coll]?.push(r.data);
-    const by = k => (a, b) => String(a[k]).localeCompare(String(b[k]));
-    db.orders.sort(by('createdAt')); db.messages.sort(by('at')); db.subscribers.sort(by('at'));
+    sortLists();
   }
   snap = new Map(rows.map(r => [`${r.coll}/${r.id}`, JSON.stringify(r.data)]));
+  newest = '';
+  noteNewest(rows);
   migrate();
-  loadedAt = Date.now();
+  loadedAt = fullAt = Date.now();
 }
 
 // Write the rows that changed since the last load/save, delete the ones that are gone.
@@ -167,6 +202,7 @@ async function push() {
   const now = current(), at = new Date().toISOString();
   const next = new Map([...now].map(([k, r]) => [k, JSON.stringify(r.data)]));
   const up = [...now].filter(([k]) => snap.get(k) !== next.get(k)).map(([, r]) => ({ ...r, updated_at: at }));
+  if (!up.length && [...snap.keys()].every(k => next.has(k))) return; // nothing changed
   for (let i = 0; i < up.length; i += 200) {
     await sb('/rest/v1/thryftly', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(up.slice(i, i + 200)) });
   }

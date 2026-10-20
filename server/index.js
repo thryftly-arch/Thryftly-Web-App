@@ -118,6 +118,8 @@ app.use(['/api', '/wp-json'], wrap(async (req, res, next) => {
   }
   const release = await S.lock();
   res.once('finish', release); res.once('close', release);
+  // A write that failed may have left half-changed data in memory: read everything fresh next time.
+  res.once('finish', () => { if (res.statusCode >= 400) S.invalidate(); });
   // Catalogue changes (admin, Qikink pushes, stock after a sale) should show up now, not in a minute.
   if (/^\/(api\/admin|wp-json|api\/webhooks|api\/checkout\/verify)/.test(req.originalUrl) && !req.originalUrl.startsWith('/api/admin/login')) res.once('finish', purgeSite);
   try { await S.load(); } catch (e) { release(); throw e; }
@@ -1043,6 +1045,7 @@ if (PROD && !LAMBDA) {
 
 app.use((err, req, res, next) => {
   console.error(err);
+  if (S.remote) S.invalidate();
   fail(res, err.status || (err instanceof multer.MulterError ? 400 : 500), err instanceof multer.MulterError || err.message?.startsWith('Use ') ? err.message : 'Something went wrong');
 });
 
