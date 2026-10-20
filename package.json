@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,web \"node --watch server/index.js\" vite",
+    "dev": "concurrently -k --restart-tries 10 --restart-after 1500 -n api,web \"node --watch server/index.js\" vite",
     "dev:api": "node --watch server/index.js",
     "dev:web": "vite",
     "build": "vite build",
