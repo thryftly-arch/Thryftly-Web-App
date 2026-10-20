@@ -52,7 +52,7 @@ const publicProduct = p => ({
   slug: p.slug, name: p.name, edition: p.edition, price: p.price, category: p.category, badge: p.badge, badgeStyle: p.badgeStyle,
   tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images,
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
-  sizes: p.sizes.map(s => ({ label: s.label, available: s.stock > 0 })),
+  sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
 });
 const activeProducts = () => db.products.filter(p => p.active).sort((a, b) => a.sort - b.sort);
 
@@ -92,11 +92,14 @@ function priceCart(items) {
   if (!Array.isArray(items) || !items.length || items.length > 20) throw new Error('Your cart is empty');
   const lines = items.map(it => {
     const p = activeProducts().find(p => p.slug === it.slug);
-    const s = p?.sizes.find(s => s.label === it.size);
+    const s = p?.sizes.find(s => s.label === it.size && (s.color || '') === (it.color || ''));
     const qty = Math.floor(num(it.qty, 1, 5));
+    const what = p && s ? `${p.name} (${[s.color, s.label].filter(Boolean).join(' / ')})` : '';
     if (!p || !s) throw new Error('An item in your cart is no longer available');
-    if (s.stock < qty) throw new Error(`${p.name} (${s.label}) is sold out`);
-    return { productId: p.id, slug: p.slug, name: p.name, size: s.label, sku: s.sku, qty, price: p.price };
+    // Nothing can be printed without the Qikink SKU, so don't take money for it.
+    if (I.qikinkConfigured() && !s.sku) throw new Error(`${what} can't be ordered right now`);
+    if (s.stock < qty) throw new Error(`${what} is sold out`);
+    return { productId: p.id, slug: p.slug, name: p.name, size: s.label, color: s.color || '', sku: s.sku, qty, price: p.price };
   });
   const subtotal = lines.reduce((t, l) => t + l.price * l.qty, 0);
   const { shippingFee, freeShippingOver } = db.settings;
@@ -110,7 +113,7 @@ app.post('/api/cart/quote', (req, res) => {
 
 const customerFields = ['name', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'zip'];
 function readCustomer(b = {}) {
-  const c = Object.fromEntries(customerFields.map(k => [k, str(b[k], 200)]));
+  const c = Object.fromEntries(customerFields.map(k => [k, str(b[k], k.startsWith('address') ? 90 : 200)]));
   if (!c.name || !c.address1 || !c.city || !c.state) throw new Error('Fill in your name and full address');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) throw new Error('Enter a valid email');
   if (!/^[6-9]\d{9}$/.test(c.phone.replace(/\D/g, '').slice(-10))) throw new Error('Enter a valid 10-digit mobile number');
@@ -125,7 +128,7 @@ app.post('/api/checkout', rateLimit({ windowMs: 15 * 60e3, limit: 30 }), wrap(as
   try { cart = priceCart(req.body.items); customer = readCustomer(req.body.customer); } catch (e) { return fail(res, 400, e.message); }
   const order = {
     id: id(),
-    number: 'TH' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase(),
+    number: 'th' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex'), // 14 chars, Qikink allows 15
     items: cart.lines, subtotal: cart.subtotal, shipping: cart.shipping, amount: cart.amount,
     currency: db.settings.currency, customer, status: 'created', createdAt: new Date().toISOString(),
   };
@@ -149,7 +152,7 @@ async function markPaid(order, paymentId) {
   if (order.status !== 'created') return;
   order.status = 'paid'; order.paymentId = paymentId; order.paidAt = new Date().toISOString();
   for (const l of order.items) {
-    const s = db.products.find(p => p.id === l.productId)?.sizes.find(s => s.label === l.size);
+    const s = db.products.find(p => p.id === l.productId)?.sizes.find(s => s.label === l.size && (s.color || '') === (l.color || ''));
     if (s) s.stock -= l.qty;
     if (s && s.stock < 0) { s.stock = 0; order.oversold = true; } // two people paid for a 1-of-1: refund one by hand
   }
@@ -231,11 +234,12 @@ function readProduct(b, prev = {}) {
     badge: str(b.badge, 20).toUpperCase(), badgeStyle: b.badgeStyle === 'red' ? 'red' : 'yellow', tag: str(b.tag, 40).toUpperCase(),
     color: str(b.color, 40).toUpperCase(), fitLabel: str(b.fitLabel, 40).toUpperCase(), description: str(b.description, 2000),
     ringLabel: str(b.ringLabel, 40),
-    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 12).map(s => ({ label: str(s.label, 10).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 80) })).filter(s => s.label),
+    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 120).map(s => ({ label: str(s.label, 10).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50) })).filter(s => s.label),
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
     images: Object.fromEntries(['front', 'back', 'detail', 'onBody'].map(k => [k, imgUrl(b.images?.[k])])),
     tryonImage: imgUrl(b.tryonImage),
     featured: !!b.featured, inRotation: !!b.inRotation, active: !!b.active, sort: num(b.sort, -1e4, 1e4),
+    qikink: prev.qikink, // set by the CSV import, read-only here
   };
 }
 admin.get('/products', (req, res) => res.json([...db.products].sort((a, b) => a.sort - b.sort)));
@@ -272,7 +276,49 @@ admin.post('/orders/:id/fulfill', wrap(async (req, res) => {
   await fulfill(o); res.json(o);
 }));
 admin.get('/subscribers', (req, res) => res.json(db.subscribers));
-admin.get('/qikink/orders', wrap(async (req, res) => res.json(await I.qikinkOrders())));
+admin.get('/qikink/orders', wrap(async (req, res) => res.json(await I.qikinkOrders({ page_no: 1 }))));
+
+// Pull status + tracking for orders we've sent. Qikink pages at 10, so ask in chunks of 10.
+admin.post('/orders/sync', wrap(async (req, res) => {
+  const open = db.orders.filter(o => o.qikink?.order_id && !['Delivered', 'Cancelled', 'Returned'].includes(o.qikinkStatus));
+  for (let i = 0; i < open.length; i += 10) {
+    const chunk = open.slice(i, i + 10);
+    for (const q of await I.qikinkOrders({ ids: chunk.map(o => o.qikink.order_id).join(',') })) {
+      const o = chunk.find(o => String(o.qikink.order_id) === String(q.order_id));
+      if (!o) continue;
+      o.qikinkStatus = q.status;
+      o.tracking = q.shipping?.tracking_link ? { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name } : o.tracking;
+    }
+  }
+  save();
+  res.json({ synced: open.length });
+}));
+
+// Import the "My Products" CSV exported from the Qikink dashboard. It has names, prices and
+// size ranges but no variant SKUs, so products arrive hidden until SKUs are filled in.
+admin.post('/import/qikink', express.text({ type: '*/*', limit: '2mb' }), (req, res) => {
+  const { parseQikinkCsv } = I;
+  let rows;
+  try { rows = parseQikinkCsv(String(req.body || '')); } catch (e) { return fail(res, 400, e.message); }
+  let added = 0, skipped = 0;
+  for (const r of rows) {
+    if (db.products.some(p => p.qikink?.productId === r.productId)) { skipped++; continue; }
+    let slug = r.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'product';
+    while (db.products.some(p => p.slug === slug)) slug += '-' + r.productId.slice(-4);
+    db.products.push({
+      id: id(), slug, name: r.name, edition: '', price: r.price, category: r.category, badge: '', badgeStyle: 'yellow',
+      tag: r.printType, color: '', fitLabel: /oversized/i.test(r.base) ? 'OVERSIZED FIT' : 'REGULAR FIT', description: '',
+      sizes: r.sizes.map(label => ({ label, color: '', stock: 999, sku: '' })),
+      specs: [{ k: 'PRINT', v: r.printType }, { k: 'BASE', v: `${r.base} (${r.baseCode})` }],
+      images: { front: '', back: '', detail: '', onBody: '' }, tryonImage: '', ringLabel: r.name.toLowerCase(),
+      featured: true, inRotation: true, active: false, sort: 100 + db.products.length,
+      qikink: { productId: r.productId, baseCode: r.baseCode, colors: r.colors, variants: r.variants, cost: r.cost, design: r.design },
+    });
+    added++;
+  }
+  save();
+  res.json({ added, skipped });
+});
 
 /* ---------------- static ---------------- */
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));

@@ -81,7 +81,7 @@ if (isHome) {
 
   const featured = products.filter(p => p.featured);
   const soldOut = p => !p.sizes.some(z => z.available);
-  const sizeLine = p => p.sizes.filter(z => z.available).map(z => z.label).join('/') || 'SOLD OUT';
+  const sizeLine = p => [...new Set(p.sizes.filter(z => z.available).map(z => z.label))].join('/') || 'SOLD OUT';
   $('#shop').innerHTML = featured.map((p, i) => `
     <div class="pwrap"><a class="pcard ${i % 2 ? 'sh-yel' : 'sh-red'}" href="${url(p)}">
       <div class="pimg${p.images.front ? ' has-img' : ''}"${imgStyle(p.images.front)}>[ product shot ]${
@@ -134,20 +134,35 @@ if (isProduct) {
   badge.classList.add(p.badgeStyle === 'red' ? 'tag-red' : 'tag-yel');
   $('.specs').innerHTML = p.specs.map(s => `<span>${esc(s.k)}</span><span>${esc(s.v)}</span>`).join('');
 
-  let size = p.sizes.find(s => s.available)?.label;
-  $('.sizes-row').innerHTML = p.sizes.map(s =>
-    `<button class="size${s.label === size ? ' on' : ''}" ${s.available ? '' : 'disabled'} aria-pressed="${s.label === size}">${esc(s.label)}</button>`).join('');
-  $$('.size').forEach(b => b.addEventListener('click', () => {
-    size = b.textContent;
-    $$('.size').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
-  }));
-
+  // Variants are colour × size. Colour buttons only appear when a product has colours.
+  const colors = [...new Set(p.sizes.map(v => v.color).filter(Boolean))];
+  let color = colors.find(c => p.sizes.some(v => v.color === c && v.available)) ?? colors[0] ?? '';
+  let size;
   const add = $('.add-cart');
-  if (!size) { add.textContent = 'SOLD OUT'; add.disabled = true; }
+  if (colors.length) $('.sizes').insertAdjacentHTML('beforebegin', '<div class="sizes colors"><span class="sizes-label">COLOUR — <span class="p-color"></span></span><div class="sizes-row colors-row"></div></div>');
+
+  function drawVariants() {
+    const vs = p.sizes.filter(v => (v.color || '') === color);
+    if (!vs.some(v => v.label === size && v.available)) size = vs.find(v => v.available)?.label;
+    if (colors.length) {
+      $('.p-color').textContent = color;
+      $('.colors-row').innerHTML = colors.map(c => `<button class="size${c === color ? ' on' : ''}" aria-pressed="${c === color}" ${p.sizes.some(v => v.color === c && v.available) ? '' : 'disabled'}>${esc(c)}</button>`).join('');
+      $$('.colors-row .size').forEach(b => b.addEventListener('click', () => { color = b.textContent; drawVariants(); }));
+    }
+    $('.sizes:not(.colors) .sizes-row').innerHTML = vs.map(v =>
+      `<button class="size${v.label === size ? ' on' : ''}" ${v.available ? '' : 'disabled'} aria-pressed="${v.label === size}">${esc(v.label)}</button>`).join('');
+    $$('.sizes:not(.colors) .size').forEach(b => b.addEventListener('click', () => { size = b.textContent; drawVariants(); }));
+    add.disabled = !size;
+    if (!size) add.textContent = 'SOLD OUT';
+    else if (add.textContent === 'SOLD OUT') add.textContent = 'ADD TO CART →';
+  }
+  drawVariants();
+
   add.addEventListener('click', () => {
-    addToCart(p.slug, size);
+    if (add.dataset.added) return void (location.href = '/checkout.html');
+    addToCart(p.slug, size, color);
     add.textContent = 'ADDED — VIEW CART →';
-    add.onclick = () => (location.href = '/checkout.html');
+    add.dataset.added = '1';
     gsap.fromTo('.cart-btn', { rotationY: 0 }, { rotationY: 360, transformPerspective: 400, duration: 0.6, ease: 'power2.out' });
   });
 

@@ -91,14 +91,15 @@ function rows(container, items, cols, blank) {
   };
   $('.adm-add', container).addEventListener('click', () => { items.push(blank()); draw(); });
   draw();
+  return draw;
 }
 
 /* ---------- products ---------- */
 async function viewProducts() {
   const products = await req('GET', '/products');
   main().innerHTML = `
-    <div class="adm-bar"><h1 class="adm-h">PRODUCTS</h1><button class="btn-red new">+ NEW PRODUCT</button></div>
-    <p class="adm-note">Qikink has no catalogue API, so each size here carries the SKU of the matching product in your Qikink “My Products” list. Paid orders are sent to Qikink with those SKUs automatically.</p>
+    <div class="adm-bar"><h1 class="adm-h">PRODUCTS</h1><div style="display:flex;gap:12px"><label class="btn-ghost">IMPORT QIKINK CSV<input type="file" accept=".csv,text/csv" class="csv" hidden></label><button class="btn-red new">+ NEW PRODUCT</button></div></div>
+    <p class="adm-note">Qikink has no catalogue API. Import the “My Products” CSV from the Qikink dashboard to create products (they arrive hidden), then add each colour × size SKU from Qikink. A variant without a SKU can't be bought. Paid orders go to Qikink automatically.</p>
     <table class="adm-table"><thead><tr><th></th><th>NAME</th><th>PRICE</th><th class="hide-sm">STOCK</th><th class="hide-sm">QIKINK SKUs</th><th class="hide-sm">SHOWN IN</th><th>STATUS</th><th></th></tr></thead><tbody></tbody></table>`;
   const tb = $('tbody', main());
   for (const p of products) {
@@ -116,9 +117,19 @@ async function viewProducts() {
     $('button', tr).addEventListener('click', () => editProduct(p));
     tb.append(tr);
   }
+  $('.csv', main()).addEventListener('change', async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      const r = await fetch('/api/admin/import/qikink', { method: 'POST', headers: { 'Content-Type': 'text/csv' }, body: await f.text() });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      toast(`IMPORTED ${j.added} · ALREADY HERE ${j.skipped}`); viewProducts();
+    } catch (err) { toast(err.message, true); }
+  });
   $('.new', main()).addEventListener('click', () => editProduct({
     name: '', edition: '', price: 0, category: '', badge: '', badgeStyle: 'yellow', tag: 'REWORKED VINTAGE', color: '', fitLabel: '', description: '',
-    sizes: [{ label: 'M', stock: 1, sku: '' }], specs: [], images: { front: '', back: '', detail: '', onBody: '' }, tryonImage: '', ringLabel: '',
+    sizes: [{ label: 'M', color: '', stock: 1, sku: '' }], specs: [], images: { front: '', back: '', detail: '', onBody: '' }, tryonImage: '', ringLabel: '',
     featured: true, inRotation: true, active: false, sort: products.length + 1,
   }));
 }
@@ -137,7 +148,10 @@ function editProduct(src) {
       <label class="adm-field">BADGE COLOUR<select name="badgeStyle"><option value="yellow">Yellow</option><option value="red">Red</option></select></label>
       ${f('ringLabel', 'RING PLACEHOLDER LABEL', '', 'shown when no image')}${f('sort', 'SORT ORDER', '', 'lower = first')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
-      <div class="adm-field full sizes-box">SIZES · STOCK · QIKINK SKU<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SIZE</button></div>
+      ${p.qikink ? `<p class="adm-note full" style="grid-column:1/-1;margin:0">QIKINK #${esc(p.qikink.productId)} · ${esc(p.qikink.baseCode)} · ${p.qikink.colors} colours · ${p.qikink.variants} variants on Qikink · cost ${esc(symbol)}${p.qikink.cost} → margin <b class="margin"></b></p>` : ''}
+      <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand.</small>
+        <div class="adm-row" style="grid-template-columns:1fr auto;margin:6px 0"><input class="gen-colors" placeholder="Colours, comma separated (e.g. Black, Bone, Red)"><button type="button" class="gen">MAKE COLOUR × SIZE ROWS</button></div>
+        <div class="adm-rows"></div><button type="button" class="adm-add">+ ADD VARIANT</button></div>
       <div class="adm-field full specs-box">SPECS<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SPEC</button></div>
       <div class="adm-field full">IMAGES <small>Front shows on cards, ring and checkout. Try-on works best with a transparent PNG cut-out of the garment.</small><div class="adm-imgs"></div></div>
       <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> LIVE ON SITE</label><label><input type="checkbox" name="featured"> IN PRODUCT GRID</label><label><input type="checkbox" name="inRotation"> IN THE ROTATION RING</label></div>
@@ -146,7 +160,20 @@ function editProduct(src) {
   const form = $('.adm-form', main());
   form.badgeStyle.value = p.badgeStyle;
   ['active', 'featured', 'inRotation'].forEach(k => (form[k].checked = !!p[k]));
-  rows($('.sizes-box', form), p.sizes, [{ k: 'label', ph: 'Size', w: '90px' }, { k: 'stock', ph: 'Stock', w: '90px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ label: '', stock: 1, sku: '' }));
+  const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '' }));
+  // Expand colours × existing sizes, keeping any SKUs already typed in.
+  $('.gen', form).addEventListener('click', () => {
+    const colors = $('.gen-colors', form).value.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+    const sizes = [...new Set(p.sizes.map(v => v.label))];
+    if (!colors.length || !sizes.length) return toast('Add at least one size row and type the colours', true);
+    const old = p.sizes.splice(0);
+    for (const c of colors) for (const z of sizes) p.sizes.push(old.find(v => v.color === c && v.label === z) || { color: c, label: z, stock: old.find(v => v.label === z)?.stock ?? 999, sku: '' });
+    drawVariants();
+  });
+  if (p.qikink) {
+    const m = () => { const pr = +form.price.value, c = p.qikink.cost; $('.margin', form).textContent = `${symbol}${(pr - c).toFixed(0)} (${pr ? Math.round((pr - c) / pr * 100) : 0}%)`; };
+    form.price.addEventListener('input', m); m();
+  }
   rows($('.specs-box', form), p.specs, [{ k: 'k', ph: 'Label', w: '160px' }, { k: 'v', ph: 'Value', w: '1fr' }], () => ({ k: '', v: '' }));
   const imgs = $('.adm-imgs', form);
   [['front', 'FRONT'], ['back', 'BACK'], ['detail', 'DETAIL'], ['onBody', 'ON BODY']].forEach(([k, l]) => imgs.append(imgField(l, p.images[k], v => (p.images[k] = v))));
@@ -210,18 +237,19 @@ async function viewSite() {
 const STATUS = { created: ['AWAITING PAYMENT', 'grey'], paid: ['PAID', 'yel'], sent_to_qikink: ['SENT TO QIKINK', 'green'], fulfillment_failed: ['FULFILMENT FAILED', 'red'] };
 async function viewOrders() {
   const orders = await req('GET', '/orders');
-  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">ORDERS</h1><button class="btn-ghost qk">CHECK QIKINK</button></div>
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">ORDERS</h1><div style="display:flex;gap:12px"><button class="btn-ghost sync">SYNC QIKINK STATUS</button><button class="btn-ghost qk">RAW QIKINK ORDERS</button></div></div>
     <p class="adm-note">Paid orders go to Qikink automatically. If one fails (missing SKU, Qikink down), fix the cause and press RETRY. “Awaiting payment” orders are abandoned checkouts.</p>
     <div class="list">${orders.length ? '' : '<p class="adm-note">No orders yet.</p>'}</div><pre class="adm-note qk-out"></pre>`;
   const list = $('.list', main());
   for (const o of orders) {
     const [label, color] = STATUS[o.status] || [o.status, 'grey'];
     const c = o.customer;
-    const el = h(`<details class="adm-order"><summary><span>${esc(o.number)}</span><span>${new Date(o.createdAt).toLocaleString()}</span><span>${esc(c.name)} · ${esc(c.city)}</span><span>${esc(symbol)}${o.amount}</span><span class="adm-pill ${color}">${label}</span></summary>
+    const el = h(`<details class="adm-order"><summary><span>${esc(o.number)}</span><span>${new Date(o.createdAt).toLocaleString()}</span><span>${esc(c.name)} · ${esc(c.city)}</span><span>${esc(symbol)}${o.amount}</span><span class="adm-pill ${color}">${o.qikinkStatus ? esc(o.qikinkStatus.toUpperCase()) : label}</span></summary>
       <div class="adm-order-body">
-        <div>${o.items.map(i => `${i.qty} × ${esc(i.name)} (${esc(i.size)}) — ${esc(symbol)}${i.price} <small>${i.sku ? 'SKU ' + esc(i.sku) : '<span class="red">NO SKU</span>'}</small>`).join('<br>')}
+        <div>${o.items.map(i => `${i.qty} × ${esc(i.name)} (${esc([i.color, i.size].filter(Boolean).join(' / '))}) — ${esc(symbol)}${i.price} <small>${i.sku ? 'SKU ' + esc(i.sku) : '<span class="red">NO SKU</span>'}</small>`).join('<br>')}
           <br>Shipping: ${esc(symbol)}${o.shipping}${o.oversold ? '<br><span class="red">OVERSOLD — refund one buyer in Razorpay</span>' : ''}
-          ${o.paymentId ? `<br>Payment: ${esc(o.paymentId)}` : ''}${o.fulfillmentError ? `<br><span class="red">${esc(o.fulfillmentError)}</span>` : ''}
+          ${o.paymentId ? `<br>Payment: ${esc(o.paymentId)}` : ''}${o.qikink?.order_id ? `<br>Qikink order: ${esc(o.qikink.order_id)}` : ''}
+          ${o.tracking ? `<br>Tracking: <a class="adm-link" href="${esc(o.tracking.url)}" target="_blank" rel="noopener">${esc(o.tracking.courier || 'courier')} ${esc(o.tracking.awb)}</a>` : ''}${o.fulfillmentError ? `<br><span class="red">${esc(o.fulfillmentError)}</span>` : ''}
           ${o.status === 'fulfillment_failed' ? '<br><br><button class="btn-red retry">RETRY SEND TO QIKINK</button>' : ''}</div>
         <div>${esc(c.name)}<br>${esc(c.address1)}${c.address2 ? '<br>' + esc(c.address2) : ''}<br>${esc(c.city)}, ${esc(c.state)} ${esc(c.zip)}<br>${esc(c.phone)} · ${esc(c.email)}
           ${o.qikink ? `<pre>${esc(JSON.stringify(o.qikink, null, 1))}</pre>` : ''}</div>
@@ -231,6 +259,9 @@ async function viewOrders() {
     });
     list.append(el);
   }
+  $('.sync', main()).addEventListener('click', async () => {
+    try { const r = await req('POST', '/orders/sync'); toast(`SYNCED ${r.synced} ORDERS`); viewOrders(); } catch (e) { toast(e.message, true); }
+  });
   $('.qk', main()).addEventListener('click', async () => {
     try { $('.qk-out', main()).textContent = 'Orders on Qikink:\n' + JSON.stringify(await req('GET', '/qikink/orders'), null, 2); } catch (e) { toast(e.message, true); }
   });

@@ -26,11 +26,11 @@ export function setCart(items) {
   try { localStorage.setItem(KEY, JSON.stringify(items)); } catch { /* private mode */ }
   updateCartCount();
 }
-export function addToCart(slug, size) {
+export function addToCart(slug, size, color = '') {
   const items = getCart();
-  const hit = items.find(i => i.slug === slug && i.size === size);
-  // Pieces are one-offs; cap at 5 and let the server enforce real stock.
-  hit ? (hit.qty = Math.min(5, hit.qty + 1)) : items.push({ slug, size, qty: 1 });
+  const hit = items.find(i => i.slug === slug && i.size === size && (i.color || '') === color);
+  // Cap at 5 and let the server enforce real stock.
+  hit ? (hit.qty = Math.min(5, hit.qty + 1)) : items.push({ slug, size, color, qty: 1 });
   setCart(items);
 }
 export function updateCartCount() {

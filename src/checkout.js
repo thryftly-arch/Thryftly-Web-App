@@ -23,7 +23,7 @@ async function render() {
     const p = bySlug[i.slug];
     return `<div class="co-line">
       <div class="co-thumb" style="background-image:${esc(cssUrl(p.images.front))}"></div>
-      <div><div class="co-name">${esc(p.name)}</div><div class="co-meta">${esc(i.size)} · ${esc(p.color)}</div>
+      <div><div class="co-name">${esc(p.name)}</div><div class="co-meta">${esc(i.size)} · ${esc(i.color || p.color)}</div>
         <div class="co-qty"><button type="button" data-n="${n}" data-d="-1" aria-label="Less">−</button>${i.qty}<button type="button" data-n="${n}" data-d="1" aria-label="More">+</button>
         <button type="button" class="co-remove" data-n="${n}">REMOVE</button></div></div>
       <div class="co-price">${money(p.price * i.qty)}</div></div>`;

@@ -35,21 +35,27 @@ async function qikink(path, init = {}) {
   return body;
 }
 
-export const qikinkOrders = () => qikink('/api/order');
+// The legacy /api/order route works on sandbox and live (/api/order/list is live-only).
+// Accepts the same filters: id, ids, order_reference_no, status, page_no, live_date_min/max.
+export async function qikinkOrders(query = {}) {
+  const r = await qikink('/api/order?' + new URLSearchParams(query));
+  return Array.isArray(r) ? r : r?.data || [];
+}
 
 export function qikinkCreateOrder(order) {
   const [first, ...rest] = order.customer.name.trim().split(/\s+/);
   return qikink('/api/order/create', {
     method: 'POST',
     body: JSON.stringify({
-      order_number: order.number, // Qikink rejects anything but letters/digits
+      order_number: order.number, // Qikink: max 15 chars, a-z 0-9 _ only
       qikink_shipping: '1',
       gateway: 'Prepaid',
       total_order_value: String(order.amount),
       line_items: order.items.map(i => ({ search_from_my_products: 1, quantity: String(i.qty), price: String(i.price), sku: i.sku })),
       shipping_address: {
         first_name: first, last_name: rest.join(' ') || first,
-        address1: order.customer.address1, address2: order.customer.address2 || '',
+        // Qikink has a single address line, max 90 chars
+        address1: [order.customer.address1, order.customer.address2].filter(Boolean).join(', ').slice(0, 90),
         phone: order.customer.phone, email: order.customer.email,
         city: order.customer.city, zip: order.customer.zip, province: order.customer.state, country_code: 'IN',
       },
@@ -121,4 +127,51 @@ export async function ollamaStylist({ imageBase64, product }) {
   });
   if (!res.ok) throw new Error('Ollama error ' + res.status + ': ' + (await res.text()).slice(0, 200));
   return (await res.json()).message?.content?.trim() || '';
+}
+
+/* ---------------- Qikink dashboard CSV ("My Products" export) ---------------- */
+function csvRows(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(Boolean));
+}
+
+const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
+const firstNum = s => Number(String(s).split('-')[0].replace(/[^\d.]/g, '')) || 0;
+
+// The "Products" column packs several fields separated by long runs of spaces:
+// name · "Base | CODE" · design(s) · "N Colors | Size : S - 3XL | N Variants" · print type · status
+export function parseQikinkCsv(text) {
+  const [head, ...rows] = csvRows(text.replace(/^\uFEFF/, ''));
+  const col = re => head.findIndex(h => re.test(h));
+  const iId = col(/product id/i), iProd = col(/^products$/i), iCost = col(/product price/i), iSell = col(/selling price/i);
+  if (iId < 0 || iProd < 0 || iSell < 0) throw new Error('Not a Qikink products export (missing Product ID / Products / Selling Price columns)');
+  return rows.map(r => {
+    const parts = r[iProd].split(/\s{3,}/).map(s => s.trim()).filter(Boolean);
+    const vi = parts.findIndex(p => /Colors?\s*\|\s*Size/i.test(p));
+    const v = /(\d+)\s*Colors?\s*\|\s*Size\s*:\s*(\S+)\s*-\s*(\S+)\s*\|\s*(\d+)\s*Variants?/i.exec(parts[vi] || '') || [];
+    const [base = '', baseCode = ''] = (parts[1] || '').split('|').map(s => s.trim());
+    const from = SIZE_ORDER.indexOf((v[2] || '').toUpperCase()), to = SIZE_ORDER.indexOf((v[3] || '').toUpperCase());
+    const design = vi > 2 ? parts.slice(2, vi).join(' ').split('|')[0].trim() : '';
+    let name = parts[0] || 'Product';
+    // Several exports share a generic name ("Unisex Oversized Hoodie"); the design name tells them apart.
+    if (name === base && design) name = `${name} — ${design.replace(/_[0-9a-f]{10,}$/i, '')}`;
+    return {
+      productId: r[iId].trim(), name: name.toUpperCase().slice(0, 80), base, baseCode, design,
+      category: /hoodie/i.test(base) ? 'HOODIES' : /sweat/i.test(base) ? 'SWEATSHIRTS' : /tee|t-shirt/i.test(base) ? 'TEES' : 'APPAREL',
+      colors: +v[1] || 1, variants: +v[4] || 0,
+      sizes: from >= 0 && to >= from ? SIZE_ORDER.slice(from, to + 1) : ['OS'],
+      printType: (parts[vi + 1] || '').toUpperCase(),
+      cost: iCost >= 0 ? firstNum(r[iCost]) : 0, price: firstNum(r[iSell]),
+    };
+  }).filter(p => p.productId);
 }

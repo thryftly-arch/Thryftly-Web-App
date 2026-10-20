@@ -48,12 +48,14 @@ Put it behind HTTPS (Caddy, nginx, or your host's proxy). In production the serv
 Prices are always recalculated on the server. Payments are only accepted with a valid Razorpay signature, and `npm run check` tests that signature check.
 
 ### Fulfilment: Qikink
-Qikink's API covers authentication and orders only. It has **no product catalogue endpoint**. So:
-1. Create and list your products in Qikink as usual ("My Products").
-2. In Admin → Products, give each size the **SKU of the matching Qikink product**.
-3. When an order is paid, it goes to Qikink automatically as a prepaid order. If that fails (for example a missing SKU), the order shows **FULFILMENT FAILED** in Admin → Orders with the reason and a **RETRY** button.
+Qikink's API ([docs](https://documenter.getpostman.com/view/26157218/2sBYAysUHS)) only covers authentication and orders. There is **no product catalogue endpoint**, so products are brought in like this:
+1. In the Qikink dashboard, export **My Products** as a CSV. Go to Admin → Products → **Import Qikink CSV**. Each product is created **hidden**, with its name, selling price, size range, print type and Qikink cost (the admin shows your margin). Importing the same file again skips products that are already there.
+2. The CSV has no colour names and no per-variant SKUs. Open each imported product, type its colours and press **Make colour × size rows**, then paste each variant's SKU from Qikink. Customers can't buy a variant without a SKU.
+3. Tick **Live on site**.
 
-`QIKINK_BASE_URL` is `https://sandbox.qikink.com` for testing and `https://api.qikink.com` for live orders. The admin header shows which one is active.
+When an order is paid, it goes to Qikink as a prepaid order. The order number is 14 characters of `a-z0-9`, within Qikink's 15-character limit, and the address is merged into Qikink's single 90-character address line. If sending fails, the order shows **FULFILMENT FAILED** in Admin → Orders with the reason and a **RETRY** button. **Sync Qikink status** fetches each order's status and courier tracking link.
+
+`QIKINK_BASE_URL` is `https://sandbox.qikink.com` for testing and `https://api.qikink.com` for live. The `client_secret` is different for sandbox and live, while the ClientId is the same. Live API access has to be requested in the Qikink dashboard under Integration → Custom API. The rate limit is 60 requests per minute.
 
 ### AI try-on: Ollama, no API keys
 The garment cut-out is placed over the customer's photo in the browser. Nothing is uploaded until they press **Ask the AI stylist**. That sends the combined image to a local Ollama vision model, which replies with fit and styling notes.
