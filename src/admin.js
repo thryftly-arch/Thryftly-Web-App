@@ -384,7 +384,7 @@ async function viewSite() {
       <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">GRAPHICS</h2>
       <div class="adm-field full">HERO GRAPHIC <small>Replaces the 3D bolt. Leave empty to keep the bolt. Transparent PNG recommended.</small><div class="adm-imgs"></div></div>
       <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">SOCIAL LINKS</h2>
-      ${['instagram', 'tiktok', 'discord'].map(k => `<label class="adm-field">${k.toUpperCase()}<input name="social_${k}" placeholder="https://" value="${esc(s.socials?.[k])}"></label>`).join('')}
+      ${['instagram', 'discord'].map(k => `<label class="adm-field">${k.toUpperCase()}<input name="social_${k}" placeholder="https://" value="${esc(s.socials?.[k])}"></label>`).join('')}
       <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">CONTACT DETAILS <small>shown on the Contact page; leave blank to hide</small></h2>
       ${[['email', 'EMAIL'], ['phone', 'PHONE'], ['whatsapp', 'WHATSAPP NUMBER'], ['hours', 'HOURS']].map(([k, l]) => `<label class="adm-field">${l}<input name="contact_${k}" value="${esc(s.contact?.[k])}"></label>`).join('')}
       <label class="adm-field full">ADDRESS<textarea name="contact_address">${esc(s.contact?.address)}</textarea></label>

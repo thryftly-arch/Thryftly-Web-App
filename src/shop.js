@@ -153,7 +153,7 @@ export function mountChrome() {
       </form>
       <div class="footer-cols">
         <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a>${authOn() ? '<a href="/account.html">MY ACCOUNT</a>' : ''}</div>
-        <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="tiktok" target="_blank" rel="noopener">TIKTOK</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
+        <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
         <div><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
       </div>
     </div>
