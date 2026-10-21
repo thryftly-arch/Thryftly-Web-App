@@ -11,7 +11,8 @@
     "check": "node server/check.js && node server/check-supabase.js",
     "build:netlify": "vite build && node tools/netlify-redirects.js",
     "push:supabase": "node tools/push-to-supabase.js",
-    "setup:auth": "node tools/setup-supabase-auth.js"
+    "setup:auth": "node tools/setup-supabase-auth.js",
+    "copy:supabase": "node tools/copy-supabase.js"
   },
   "dependencies": {
     "compression": "^1.8.2",
