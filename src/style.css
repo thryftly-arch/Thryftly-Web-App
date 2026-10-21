@@ -598,7 +598,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .co-code { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .co-code .btn-ghost { padding: 0 18px; font: 700 12px var(--mono); letter-spacing: .12em; }
 .co-disc { color: #3bd16f; }
-.chart-btn { margin: -2px 0 10px; font: 700 11px var(--mono); letter-spacing: .14em; text-decoration: underline; color: var(--yel); }
+.sizes-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.chart-btn { flex: none; font: 700 11px var(--mono); letter-spacing: .14em; text-decoration: underline; text-underline-offset: 3px; color: var(--yel); }
+.chart-btn:hover { color: #fff; }
 .chart-dlg { margin: auto; width: min(720px, calc(100% - 32px)); max-height: calc(100vh - 48px); padding: 0; background: var(--ink); color: #fff; border: 3px solid #000; box-shadow: 10px 10px 0 var(--red); }
 .chart-dlg::backdrop { background: rgba(0,0,0,.7); backdrop-filter: blur(3px); }
 .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,.12); font: 800 13px var(--mono); letter-spacing: .1em; position: sticky; top: 0; background: var(--ink); }

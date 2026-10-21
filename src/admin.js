@@ -229,7 +229,7 @@ async function editProduct(src) {
       <label class="adm-field">BADGE COLOUR<select name="badgeStyle"><option value="yellow">Yellow</option><option value="red">Red</option></select></label>
       <label class="adm-field">3D MODEL <small>automatic picks it from the category</small><select name="model3d"><option value="">Automatic</option><option value="tee">T-shirt</option><option value="hoodie">Hoodie</option><option value="sweatshirt">Sweatshirt</option><option value="none">No 3D model</option></select></label>
       ${f('ringLabel', 'RING PLACEHOLDER LABEL', '', 'shown when no image')}${f('sort', 'SORT ORDER', '', 'lower = first')}
-      <label class="adm-field">SIZE CHART <small>edit charts under Size charts</small><select name="sizeChart"><option value="">None</option>${charts.map(c => `<option value="${esc(c.key)}">${esc(c.title)}</option>`).join('')}</select></label>
+      <label class="adm-field">SIZE CHART <small>automatic picks it from the category, name and description</small><select name="sizeChart"><option value="">Automatic${p.chartAuto ? ' (' + esc(charts.find(c => c.key === p.chartAuto)?.title || p.chartAuto) + ')' : ' (none)'}</option>${charts.map(c => `<option value="${esc(c.key)}">${esc(c.title)}</option>`).join('')}<option value="none">No size chart</option></select></label>
       ${f('googleCategory', 'GOOGLE PRODUCT CATEGORY', '', 'number, e.g. 212 = shirts &amp; tops')}
       ${f('seoTitle', 'SEO TITLE', '', 'Google + link previews; blank = name')}${f('seoDescription', 'SEO DESCRIPTION', '', 'blank = description')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
@@ -547,7 +547,7 @@ function editDiscount(src) {
 async function viewCharts() {
   const list = await req('GET', '/size-charts');
   main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">SIZE CHARTS</h1><button class="btn-red new">+ NEW CHART</button></div>
-    <p class="adm-note">One chart per kind of garment. Products point at a chart (set on each product; the Shopify import kept your old chart types). A product page shows a SIZE CHART button once its chart has an image or measurements. Qikink's size charts for each blank are in the Qikink catalogue: screenshot or export them and upload here.</p>
+    <p class="adm-note">One chart per kind of garment. Products get theirs automatically from their category, name and description (hoodie fit, tee fabric…); override one on the product page if needed. A product page shows a SIZE CHART button once its chart has an image or measurements. Qikink's size charts for each blank are in the Qikink catalogue: screenshot or export them and upload here.</p>
     <table class="adm-table"><thead><tr><th></th><th>CHART</th><th>PRODUCTS</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${list.map((c, i) => `<tr><td><div class="adm-thumb" style="background-image:${esc(cssUrl(c.image))}"></div></td><td><b>${esc(c.title)}</b><br><small>${esc(c.key)}</small></td><td>${c.products}</td>
       <td>${c.image || c.note || c.table ? '<span class="adm-pill green">SHOWN</span>' : '<span class="adm-pill yel">EMPTY</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="5">No size charts yet.</td></tr>'}</tbody></table>`;

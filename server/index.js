@@ -80,7 +80,20 @@ const publicProduct = p => ({
   unlocksAt: lockedUntil(p.id),
   sizeChart: chartFor(p), seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
 });
-const chartFor = p => { const c = p.sizeChart && db.sizeCharts.find(c => c.key === p.sizeChart); return c && (c.image || c.note || c.table) ? { title: c.title, image: c.image, table: c.table || '', note: c.note } : null; };
+// Products without a chart picked get one from what they are, using the same split Shopify had:
+// zip → zip hoodie; hoodies by fit; tees by fabric (acid wash / terry / classic); oversized sweatshirts and shirts.
+// Jackets, bottoms, combos and regular-fit sweatshirts have no chart. "none" on a product turns it off.
+function autoChart(p) {
+  const t = `${p.name} ${p.description}`, cat = p.category;
+  if (/\bzip/i.test(t) && cat === 'HOODIES') return 'zipper';
+  if (cat === 'HOODIES') return /regular fit/i.test(t) && !/oversized/i.test(t) ? 'hoodie' : 'ohoodie';
+  if (cat === 'SWEATSHIRTS') return /oversized/i.test(t) ? 'osweatshirt' : '';
+  if (cat === 'SHIRTS') return /oversized/i.test(t) ? 'oshirt' : '';
+  if (cat === 'TEES' || /\b(tee|t-shirt)\b/i.test(p.name) || /terry-knit/i.test(t)) return /acid/i.test(t) ? 'acid-wash' : /terry/i.test(t) ? 'terry' : 'classic';
+  return '';
+}
+const chartKey = p => p.sizeChart || autoChart(p);
+const chartFor = p => { const c = chartKey(p) && db.sizeCharts.find(c => c.key === chartKey(p)); return c && (c.image || c.note || c.table) ? { title: c.title, image: c.image, table: c.table || '', note: c.note } : null; };
 
 /* ---------------- email helpers ---------------- */
 const sym = () => db.settings.symbol || '₹';
@@ -534,7 +547,7 @@ function readProduct(b, prev = {}) {
     qikink: prev.qikink, // set by the CSV import, read-only here
   };
 }
-admin.get('/products', (req, res) => res.json([...db.products].sort((a, b) => a.sort - b.sort)));
+admin.get('/products', (req, res) => res.json([...db.products].sort((a, b) => a.sort - b.sort).map(p => ({ ...p, chartAuto: autoChart(p) }))));
 admin.post('/products', (req, res) => {
   try { const p = readProduct(req.body, { id: id() }); db.products.push(p); save(); res.json(p); } catch (e) { fail(res, 400, e.message); }
 });
@@ -646,7 +659,7 @@ function readChart(b, prev = {}) {
   // table: one row per line, cells split by commas, first line = headings (e.g. "SIZE, CHEST, LENGTH").
   return { ...prev, key, title: str(b.title || key, 40).toUpperCase(), image: imgUrl(b.image), table: str(b.table, 3000), note: str(b.note, 2000) };
 }
-admin.get('/size-charts', (req, res) => res.json(db.sizeCharts.map(c => ({ ...c, products: db.products.filter(p => p.sizeChart === c.key).length }))));
+admin.get('/size-charts', (req, res) => res.json(db.sizeCharts.map(c => ({ ...c, products: db.products.filter(p => chartKey(p) === c.key).length }))));
 admin.post('/size-charts', (req, res) => { try { const c = readChart(req.body, { id: id() }); db.sizeCharts.push(c); save(); res.json(c); } catch (e) { fail(res, 400, e.message); } });
 admin.put('/size-charts/:id', (req, res) => {
   const i = db.sizeCharts.findIndex(c => c.id === req.params.id);

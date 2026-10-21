@@ -127,7 +127,11 @@ if (isProduct) {
     return `<table class="chart-table"><thead><tr>${head.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   }
   if (p.sizeChart) {
-    $('.sizes .sizes-label').insertAdjacentHTML('afterend', '<button type="button" class="chart-btn">SIZE CHART</button>');
+    // On the SIZE line, at the right.
+    const label = $('.sizes .sizes-label');
+    label.insertAdjacentHTML('beforebegin', '<div class="sizes-head"></div>');
+    label.previousElementSibling.append(label);
+    label.insertAdjacentHTML('afterend', '<button type="button" class="chart-btn">SIZE CHART</button>');
     document.body.insertAdjacentHTML('beforeend', `<dialog class="chart-dlg" aria-label="Size chart"><div class="chart-head"><b>${esc(p.sizeChart.title)} — SIZE CHART</b><button type="button" class="chart-x" aria-label="Close">✕</button></div>
       ${chartTable(p.sizeChart.table)}${p.sizeChart.image ? `<img src="${esc(p.sizeChart.image)}" alt="Size chart for ${esc(p.sizeChart.title)}">` : ''}${p.sizeChart.note ? `<p class="chart-note">${esc(p.sizeChart.note)}</p>` : ''}</dialog>`);
     const dlg = $('.chart-dlg');
