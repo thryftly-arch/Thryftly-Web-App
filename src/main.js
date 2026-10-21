@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track, wasPrice, percentOff } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track, wasPrice, percentOff, bestOffer, setCode } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -117,6 +117,7 @@ if (isProduct) {
   badge.classList.add(p.badgeStyle === 'red' ? 'tag-red' : 'tag-yel');
   $('.specs').innerHTML = p.specs.map(s => `<span>${esc(s.k)}</span><span>${esc(s.v)}</span>`).join('');
   track('view_item', { items: [{ slug: p.slug, name: p.name, price: p.price }] });
+  $('.p-offer').addEventListener('click', e => { setCode(e.currentTarget.dataset.code); e.currentTarget.querySelector('span').textContent = 'APPLIED ✓ AT CHECKOUT'; });
   const { freeShippingOver } = site.settings;
   $('.tax-note').textContent = `Taxes included.${freeShippingOver ? ` Free shipping on orders over ${money(freeShippingOver)}.` : ' Free shipping.'}`;
   // Share: the phone's share sheet (WhatsApp, Instagram…), or copy the link on desktop.
@@ -197,6 +198,10 @@ if (isProduct) {
     const now = v?.price || p.price, was = v ? wasPrice(p, v) : wasPrice(p);
     $('.p-price').textContent = money(now);
     $('.p-split').innerHTML = was > now ? `<s>${money(was)}</s> <b class="off">${percentOff(now, was)}% OFF</b>` : '';
+    // "₹962 with WELCOME10": the best advertised code for this piece; tap to apply it.
+    const deal = bestOffer(p, now), po = $('.p-offer');
+    po.hidden = !deal;
+    if (deal) { po.dataset.code = deal.code; po.innerHTML = `GET IT FOR <b>${money(now - deal.off)}</b> WITH <b>${esc(deal.code)}</b> <span>TAP TO APPLY</span>`; }
     showShots();
     add.disabled = !size || !!p.unlocksAt;
     if (p.unlocksAt) add.textContent = `DROPS ${new Date(p.unlocksAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).toUpperCase()}`;

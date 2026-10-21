@@ -20,6 +20,36 @@ export async function loadSite() {
   return site;
 }
 
+/* ---------- offers: advertised discount codes ---------- */
+// The code a shopper picked (strip, cart or checkout), remembered for checkout.
+const CODE = 'thryftly_code';
+export const getCode = () => { try { return localStorage.getItem(CODE) || ''; } catch { return ''; } };
+export function setCode(c) {
+  try { c ? localStorage.setItem(CODE, c.toUpperCase()) : localStorage.removeItem(CODE); } catch { /* ignore */ }
+  window.dispatchEvent(new CustomEvent('thryftly:code'));
+}
+const catWords = cats => cats.map(c => catLabel(c).toLowerCase()).join(' & ').toUpperCase();
+// "10% OFF EVERYTHING", "15% OFF HOODIES & SWEATSHIRTS", "₹200 OFF OVER ₹1499"…
+export function offerText(o) {
+  if (o.headline) return o.headline.toUpperCase();
+  const what = o.type === 'percent' ? `${o.value}% OFF` : o.type === 'flat' ? `${money(o.value)} OFF` : 'FREE SHIPPING';
+  const on = o.categories.length ? ` ${o.type === 'freeship' ? 'ON' : ''} ${catWords(o.categories)}`.replace('  ', ' ') : o.type === 'freeship' ? '' : ' EVERYTHING';
+  return `${what}${on}${o.minOrder ? ` OVER ${money(o.minOrder)}` : ''}${o.oncePerCustomer ? ' · FIRST ORDER' : ''}`;
+}
+// The best advertised deal on one product at this price, for "₹962 with WELCOME10" on product pages.
+export function bestOffer(p, price) {
+  let best = null;
+  for (const o of site?.offers || []) {
+    if (o.categories.length && !o.categories.includes(p.category)) continue;
+    if (o.minOrder && price < o.minOrder) continue;
+    const off = o.type === 'percent' ? Math.round(price * o.value / 100) : o.type === 'flat' ? Math.min(o.value, price) : 0;
+    if (off > (best?.off || 0)) best = { ...o, off };
+  }
+  return best;
+}
+// Server-priced cart: subtotal, discount, shipping, total (and why a code didn't apply).
+export const quoteCart = (items, code, email = '') => api('/api/cart/quote', { items, code, email });
+
 /* ---------- analytics (GA4 + Meta Pixel, IDs set in Admin → Site content) ---------- */
 function analytics({ ga4Id, metaPixelId }) {
   const add = src => document.head.append(Object.assign(document.createElement('script'), { async: true, src }));
@@ -144,6 +174,7 @@ export function mountChrome() {
       <a class="cart-sq" href="/checkout.html" data-drawer="cart" aria-label="Cart"><span class="cart-count">0</span></a>
       <button class="burger" aria-label="Menu" aria-controls="nav-links" aria-expanded="false"><span></span><span></span></button>
     </div>`;
+  offerStrip(header);
   const footer = $('footer[data-chrome]');
   if (footer) footer.innerHTML = `
     <div class="footer-top">
@@ -183,6 +214,29 @@ export function mountChrome() {
   syncSaved();
   // Cart drawer, quick add, page transitions and the cursor ring: loaded once the header exists.
   import('./extras.js').then(m => m.init());
+}
+
+// Strip above the header with every advertised code; tap one to apply it (it waits in the cart and checkout).
+function offerStrip(header) {
+  const list = site?.offers || [];
+  if (!header || !list.length || $('.offer-bar')) return;
+  header.insertAdjacentHTML('beforebegin', `<div class="offer-bar" role="region" aria-label="Offers"><div class="offer-track">${list.map((o, i) =>
+    `<button type="button" class="offer${i ? '' : ' on'}" data-code="${esc(o.code)}"><span>${esc(offerText(o))}</span><b>USE ${esc(o.code)}</b><i>TAP TO APPLY</i></button>`).join('')}</div></div>`);
+  const bar = $('.offer-bar'), items = $$('.offer', bar);
+  const mark = () => items.forEach(b => b.classList.toggle('applied', b.dataset.code === getCode()));
+  bar.addEventListener('click', e => {
+    const b = e.target.closest('.offer');
+    if (!b) return;
+    setCode(b.dataset.code);
+    track('select_promotion', {});
+  });
+  window.addEventListener('thryftly:code', mark);
+  mark();
+  // More than one offer: show them one after another.
+  if (items.length > 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    let i = 0;
+    setInterval(() => { if (bar.matches(':hover')) return; items[i].classList.remove('on'); i = (i + 1) % items.length; items[i].classList.add('on'); }, 4000);
+  }
 }
 
 /* ---------- product card (home grid + shop page) ---------- */

@@ -1,4 +1,4 @@
-import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome, track } from './shop.js';
+import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome, track, offerText, getCode, setCode } from './shop.js';
 import { token, session, signedIn, accountApi } from './auth.js';
 
 const site = await loadSite();
@@ -32,6 +32,18 @@ const codeKey = 'thryftly_code';
 try { if (!form.code.value) form.code.value = localStorage.getItem(codeKey) || ''; } catch { /* ignore */ }
 let quote = null;
 $('.co-apply').addEventListener('click', () => render());
+// Advertised codes, one tap to apply (tap again to remove).
+function drawOffers() {
+  const code = form.code.value.trim().toUpperCase();
+  $('.co-offers').innerHTML = (site.offers || []).map(o => `<button type="button" class="dr-offer${o.code === code ? ' on' : ''}" data-code="${esc(o.code)}"><b>${esc(o.code)}</b><span>${esc(offerText(o))}</span></button>`).join('');
+}
+$('.co-offers').addEventListener('click', e => {
+  const b = e.target.closest('[data-code]');
+  if (!b) return;
+  form.code.value = b.dataset.code === form.code.value.trim().toUpperCase() ? '' : b.dataset.code;
+  render();
+});
+window.addEventListener('thryftly:code', () => { form.code.value = getCode(); render(); });
 form.code.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); render(); } });
 
 async function render() {
@@ -57,6 +69,7 @@ async function render() {
     const code = form.code.value.trim().toUpperCase();
     const q = quote = await api('/api/cart/quote', { items, code, email: form.email.value });
     try { q.discount ? localStorage.setItem(codeKey, q.discount.code) : localStorage.removeItem(codeKey); } catch { /* ignore */ }
+    drawOffers();
     if (q.discountError) form.code.value = '';
     $('.co-sum').innerHTML = `<span>SUBTOTAL</span><span>${money(q.subtotal)}</span>${q.discount ? `<span class="co-disc">${esc(q.discount.code)} ${q.discount.freeShipping ? '(FREE SHIPPING)' : ''}</span><span class="co-disc">${q.discount.amount ? '−' + money(q.discount.amount) : '✓'}</span>` : ''}<span>SHIPPING</span><span>${q.shipping ? money(q.shipping) : 'FREE'}</span><span class="tot">TOTAL</span><span class="tot">${money(q.amount)}</span>`;
     $('.co-pay').disabled = !site.payments;

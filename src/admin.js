@@ -511,9 +511,9 @@ async function viewDiscounts() {
     <p class="adm-note">Codes customers type at checkout. Share a link that fills the code in for them: <b>yoursite/discount/CODE</b> (old Shopify discount links keep working). Put a code in the welcome and cart-reminder emails under Site content → Emails.</p>
     <table class="adm-table"><thead><tr><th>CODE</th><th>GIVES</th><th class="hide-sm">MIN ORDER</th><th>USED</th><th class="hide-sm">ENDS</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${list.map((d, i) => `<tr><td><b>${esc(d.code)}</b>${d.note ? `<br><small>${esc(d.note)}</small>` : ''}</td><td>${esc(dLabel(d))}${d.categories?.length ? `<br><small>on ${esc(d.categories.join(', ').toLowerCase())}</small>` : ''}</td><td class="hide-sm">${d.minOrder ? esc(symbol) + d.minOrder : '—'}</td><td>${d.used || 0}${d.limit ? ' / ' + d.limit : ''}</td><td class="hide-sm">${d.endsAt ? new Date(d.endsAt).toLocaleDateString() : '—'}</td>
-      <td>${d.active && !(d.endsAt && Date.parse(d.endsAt) < Date.now()) ? '<span class="adm-pill green">ON</span>' : '<span class="adm-pill grey">OFF</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="7">No codes yet.</td></tr>'}</tbody></table>`;
+      <td>${d.active && !(d.endsAt && Date.parse(d.endsAt) < Date.now()) ? '<span class="adm-pill green">ON</span>' : '<span class="adm-pill grey">OFF</span>'}${d.advertise ? ' <span class="adm-pill yel">ON SITE</span>' : ''}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="7">No codes yet.</td></tr>'}</tbody></table>`;
   main().querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => editDiscount(list[b.dataset.i])));
-  $('.new', main()).addEventListener('click', () => editDiscount({ code: '', type: 'percent', value: 10, minOrder: 0, limit: 0, oncePerCustomer: true, startsAt: '', endsAt: '', active: true, note: '' }));
+  $('.new', main()).addEventListener('click', () => editDiscount({ code: '', type: 'percent', value: 10, minOrder: 0, limit: 0, oncePerCustomer: true, startsAt: '', endsAt: '', active: true, note: '', advertise: true, headline: '' }));
 }
 async function editDiscount(src) {
   const d = structuredClone(src);
@@ -527,20 +527,21 @@ async function editDiscount(src) {
       <label class="adm-field">MINIMUM ORDER (${esc(symbol)}) <small>0 = none</small><input name="minOrder" type="number" min="0" value="${d.minOrder}"></label>
       <label class="adm-field">TOTAL USES <small>0 = unlimited; used ${d.used || 0} so far</small><input name="limit" type="number" min="0" value="${d.limit}"></label>
       <label class="adm-field">NOTE <small>only you see this</small><input name="note" value="${esc(d.note)}"></label>
+      <label class="adm-field full">ADVERT TEXT <small>shown in the offer strip, cart and checkout when "show on the site" is ticked; blank = written for you, e.g. "10% OFF EVERYTHING"</small><input name="headline" maxlength="80" value="${esc(d.headline || '')}"></label>
       <label class="adm-field">STARTS <small>empty = now</small><input name="startsAt" type="datetime-local" value="${local(d.startsAt)}"></label>
       <label class="adm-field">ENDS <small>empty = never</small><input name="endsAt" type="datetime-local" value="${local(d.endsAt)}"></label>
       <div class="adm-checks full adm-field">ONLY ON THESE CATEGORIES <small>none ticked = the whole order</small>${cats.map(c => `<label><input type="checkbox" class="dcat" value="${esc(c)}" ${d.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div>
-      <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> CODE IS ON</label><label><input type="checkbox" name="oncePerCustomer"> ONCE PER CUSTOMER (by email)</label></div>
+      <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> CODE IS ON</label><label><input type="checkbox" name="oncePerCustomer"> ONCE PER CUSTOMER (by email)</label><label><input type="checkbox" name="advertise"> SHOW ON THE SITE (offer strip, cart, checkout)</label></div>
       <div class="adm-actions">${d.id ? '<button type="button" class="adm-danger del">DELETE CODE</button>' : '<span></span>'}<button class="btn-red">SAVE CODE</button></div>
     </form>`;
   const form = $('.adm-form', main());
-  form.type.value = d.type; form.active.checked = !!d.active; form.oncePerCustomer.checked = !!d.oncePerCustomer;
+  form.type.value = d.type; form.active.checked = !!d.active; form.oncePerCustomer.checked = !!d.oncePerCustomer; form.advertise.checked = !!d.advertise;
   $('.back', main()).addEventListener('click', viewDiscounts);
   $('.del', main())?.addEventListener('click', async () => { if (confirm(`Delete ${d.code}?`)) { await req('DELETE', '/discounts/' + d.id); toast('DELETED'); viewDiscounts(); } });
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
-    const body = { ...d, ...fd, active: form.active.checked, oncePerCustomer: form.oncePerCustomer.checked, categories: [...form.querySelectorAll('.dcat:checked')].map(i => i.value),
+    const body = { ...d, ...fd, active: form.active.checked, oncePerCustomer: form.oncePerCustomer.checked, advertise: form.advertise.checked, categories: [...form.querySelectorAll('.dcat:checked')].map(i => i.value),
       startsAt: fd.startsAt ? new Date(fd.startsAt).toISOString() : '', endsAt: fd.endsAt ? new Date(fd.endsAt).toISOString() : '' };
     try { const saved = await req(d.id ? 'PUT' : 'POST', '/discounts' + (d.id ? '/' + d.id : ''), body); toast('SAVED'); editDiscount(saved); } catch (err) { toast(err.message, true); }
   });

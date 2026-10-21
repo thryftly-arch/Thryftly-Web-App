@@ -159,7 +159,7 @@ app.get('/api/site', (req, res) => {
   const drops = liveDrops().map(d => ({ id: d.id, name: d.name, tagline: d.tagline, description: d.description, banner: d.banner, startsAt: d.startsAt, endsAt: d.endsAt, products: d.productIds.map(i => slugOf[i]).filter(Boolean) }));
   const auth = S.remote && process.env.SUPABASE_PUBLISHABLE_KEY ? { url: process.env.SUPABASE_URL.replace(/\/+$/, ''), key: process.env.SUPABASE_PUBLISHABLE_KEY } : null;
   edgeCache(res);
-  pubJson(res, { settings: db.settings, pages: db.pages, drops, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured(), auth });
+  pubJson(res, { settings: db.settings, pages: db.pages, drops, products: activeProducts().map(publicProduct), payments: I.razorpayConfigured(), auth, offers: offers() });
 });
 
 app.get('/api/products/:slug', (req, res) => {
@@ -245,6 +245,11 @@ app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async
 }));
 
 /* ---------------- checkout ---------------- */
+// Codes ticked "show on the site": in the offer strip, cart and checkout. Only ones that work right now.
+const offers = () => db.discounts
+  .filter(d => d.advertise && d.active && !(d.startsAt && Date.parse(d.startsAt) > Date.now()) && !(d.endsAt && Date.parse(d.endsAt) < Date.now()) && !(d.limit && (d.used || 0) >= d.limit))
+  .map(d => ({ code: d.code, type: d.type, value: d.value, minOrder: d.minOrder, categories: d.categories || [], oncePerCustomer: !!d.oncePerCustomer, headline: d.headline || '' }));
+
 // Discount codes (Admin → Discounts). Errors carry .discount so a quote can still show the cart.
 // categories: only those products count (e.g. WINTER15 on hoodies + sweatshirts); empty = everything.
 function applyDiscount(code, lines, email) {
@@ -646,7 +651,8 @@ function readDiscount(b, prev = {}) {
   const when = v => { const t = Date.parse(v); return isNaN(t) ? '' : new Date(t).toISOString(); };
   return { ...prev, code, type, value: type === 'percent' ? num(b.value, 0, 100) : num(b.value), minOrder: num(b.minOrder), limit: Math.floor(num(b.limit)), oncePerCustomer: !!b.oncePerCustomer,
     startsAt: when(b.startsAt), endsAt: when(b.endsAt), active: !!b.active, used: prev.used || 0, note: str(b.note, 120),
-    categories: (Array.isArray(b.categories) ? b.categories : []).map(c => str(c, 40).toUpperCase()).filter(Boolean).slice(0, 20) };
+    categories: (Array.isArray(b.categories) ? b.categories : []).map(c => str(c, 40).toUpperCase()).filter(Boolean).slice(0, 20),
+    advertise: !!b.advertise, headline: str(b.headline, 80) };
 }
 admin.get('/discounts', (req, res) => res.json(db.discounts));
 admin.post('/discounts', (req, res) => { try { const d = readDiscount(req.body, { id: id() }); db.discounts.push(d); save(); res.json(d); } catch (e) { fail(res, 400, e.message); } });

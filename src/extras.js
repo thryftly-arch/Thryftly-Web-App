@@ -3,7 +3,7 @@
 //   - card buttons: ♡ save and + QUICK ADD without leaving the grid
 //   - bolt-wipe page transitions between internal pages
 //   - a cursor ring that swells over anything clickable, magnetic main buttons (mouse only)
-import { $, $$, esc, cssUrl, loadSite, money, getCart, setCart, addToCart, getSaved, toggleSaved, productUrl } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, getCart, setCart, addToCart, getSaved, toggleSaved, productUrl, getCode, setCode, offerText, quoteCart } from './shop.js';
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BOLT = '<path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/>';
@@ -50,6 +50,8 @@ function drawer() {
   }
   window.addEventListener('thryftly:drawer', e => open(e.detail || 'cart'));
   window.addEventListener('thryftly:saved', () => d.classList.contains('open') && render());
+  // A code applied from the offer strip opens the cart so the shopper sees it work.
+  window.addEventListener('thryftly:code', () => { if (d.classList.contains('open')) render(); else if (getCode() && getCart().length && !location.pathname.startsWith('/checkout')) open('cart'); });
   d.addEventListener('click', onDrawerClick);
   setCart(getCart()); // refresh both counts
 }
@@ -109,9 +111,34 @@ function render() {
     const left = Math.max(0, free - subtotal), pct = Math.min(100, subtotal / free * 100);
     return `<div class="dr-ship"><span>${left ? `${money(left)} AWAY FROM FREE SHIPPING` : 'FREE SHIPPING UNLOCKED ⚡'}</span><i style="--p:${pct}%"></i></div>`;
   })() : '';
+  const code = getCode(), offers = site.offers || [];
   foot.innerHTML = items.length
-    ? `${bar}<div class="dr-total"><span>SUBTOTAL</span><span>${money(subtotal)}</span></div><a class="btn-red dr-wide" href="/checkout.html">CHECKOUT →</a>`
+    ? `${bar}
+      ${offers.length ? `<div class="dr-offers">${offers.map(o => `<button class="dr-offer${o.code === code ? ' on' : ''}" data-code="${esc(o.code)}"><b>${esc(o.code)}</b><span>${esc(offerText(o))}</span></button>`).join('')}</div>` : ''}
+      <form class="dr-code"><input name="code" placeholder="Discount code" value="${esc(code)}" autocomplete="off" aria-label="Discount code"><button class="dr-btn">${code ? 'CHANGE' : 'APPLY'}</button></form>
+      <p class="dr-msg" aria-live="polite"></p>
+      <div class="dr-sum"><span>SUBTOTAL</span><span>${money(subtotal)}</span></div>
+      <a class="btn-red dr-wide" href="/checkout.html">CHECKOUT →</a>`
     : `<a class="btn-red dr-wide" href="/shop.html">SHOP THE DROP →</a>`;
+  if (items.length) priceIt(items, code);
+}
+
+// The server prices the cart (discount, shipping), so the drawer shows exactly what checkout will.
+let quoteSeq = 0;
+async function priceIt(items, code) {
+  const seq = ++quoteSeq, foot = $('.drawer .dr-foot');
+  try {
+    const q = await quoteCart(items, code);
+    if (seq !== quoteSeq) return;
+    if (q.discountError) { setCode(''); $('.dr-msg', foot).textContent = q.discountError; $('.dr-msg', foot).classList.add('err'); }
+    $('.dr-sum', foot).innerHTML = `<span>SUBTOTAL</span><span>${money(q.subtotal)}</span>
+      ${q.discount ? `<span class="dr-disc">${esc(q.discount.code)}${q.discount.freeShipping ? ' (FREE SHIPPING)' : ''} <button class="dr-x" data-uncode aria-label="Remove code">✕</button></span><span class="dr-disc">${q.discount.amount ? '−' + money(q.discount.amount) : '✓'}</span>` : ''}
+      <span>SHIPPING</span><span>${q.shipping ? money(q.shipping) : 'FREE'}</span>
+      <span class="tot">TOTAL</span><span class="tot">${money(q.amount)}</span>`;
+    if (q.discount?.amount) { $('.dr-msg', foot).textContent = `YOU SAVE ${money(q.discount.amount)} ⚡`; $('.dr-msg', foot).classList.remove('err'); }
+  } catch (e) {
+    if (seq === quoteSeq) $('.dr-msg', foot).textContent = e.message;
+  }
 }
 
 let qColor = '', qSize = '';
@@ -139,6 +166,9 @@ function renderQuick(body, foot) {
 function onDrawerClick(e) {
   const b = e.target.closest('button');
   if (!b) return;
+  if (b.dataset.code) { setCode(b.dataset.code === getCode() ? '' : b.dataset.code); return render(); }
+  if ('uncode' in b.dataset) { setCode(''); return render(); }
+  if (b.closest('.dr-code')) { e.preventDefault(); setCode($('.dr-code input').value.trim()); return render(); }
   const items = getCart().filter(i => bySlug(i.slug));
   if (b.dataset.q) { const it = items[b.dataset.q]; it.qty = Math.min(5, Math.max(1, it.qty + +b.dataset.d)); setCart(items); render(); }
   else if (b.dataset.rm) { items.splice(+b.dataset.rm, 1); setCart(items); render(); }
