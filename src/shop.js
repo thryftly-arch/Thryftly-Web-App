@@ -286,7 +286,8 @@ export function bindSettings(s) {
   $$('[data-s]').forEach(el => { if (s[el.dataset.s] != null) el.textContent = s[el.dataset.s]; });
   $$('[data-social]').forEach(a => {
     const u = s.socials?.[a.dataset.social];
-    if (u && /^https:\/\//.test(u)) a.href = u; else a.removeAttribute('target');
+    // Not filled in under Admin → Site content: don't show a link that goes nowhere.
+    if (u && /^https:\/\//.test(u)) a.href = u; else a.hidden = true;
   });
   updateCartCount();
 }

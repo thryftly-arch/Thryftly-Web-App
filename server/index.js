@@ -562,7 +562,7 @@ const fileName = type => Date.now().toString(36) + crypto.randomBytes(6).toStrin
 const upload = multer({
   storage: S.remote ? multer.memoryStorage() : multer.diskStorage({ destination: UPLOAD_DIR, filename: (req, f, cb) => cb(null, fileName(f.mimetype)) }),
   limits: { fileSize: 8 * 1024 * 1024 },
-  fileFilter: (req, f, cb) => cb(EXT[f.mimetype] ? null : new Error('Use PNG, JPG, WEBP or GIF'), !!EXT[f.mimetype]),
+  fileFilter: (req, f, cb) => cb(EXT[f.mimetype] ? null : Object.assign(new Error('Use PNG, JPG, WEBP or GIF'), { status: 400 }), !!EXT[f.mimetype]),
 });
 admin.post('/upload', upload.single('file'), wrap(async (req, res) => {
   if (!req.file) return fail(res, 400, 'Choose an image');

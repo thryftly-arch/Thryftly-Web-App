@@ -138,5 +138,21 @@
   to = "/shop.html?discount=:code"
   status = 302
 
+# Security headers on every page (the API adds its own, stricter ones).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(), payment=(self \"https://api.razorpay.com\")"
+
+# Built JS/CSS have content hashes in their names: cache them for a year.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # /uploads/* → Supabase Storage is written to dist/_redirects at build time (tools/netlify-redirects.js),
 # because it needs SUPABASE_URL.
