@@ -76,7 +76,7 @@ const publicProduct = p => ({
   tag: p.tag, color: p.color, fitLabel: p.fitLabel, description: p.description, specs: p.specs, images: p.images, colorImages: p.colorImages || {}, colorBacks: p.colorBacks || {},
   model3d: p.model3d || '', printFront: p.printFront || '', printBack: p.printBack || '',
   tryonImage: p.tryonImage, ringLabel: p.ringLabel, featured: p.featured, inRotation: p.inRotation,
-  sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
+  sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, compare: s.compare > (s.price || p.price) ? s.compare : 0, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
   unlocksAt: lockedUntil(p.id),
   sizeChart: chartFor(p), seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
 });
@@ -246,14 +246,19 @@ app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async
 
 /* ---------------- checkout ---------------- */
 // Discount codes (Admin → Discounts). Errors carry .discount so a quote can still show the cart.
-function applyDiscount(code, subtotal, email) {
+// categories: only those products count (e.g. WINTER15 on hoodies + sweatshirts); empty = everything.
+function applyDiscount(code, lines, email) {
+  const subtotal = lines.reduce((t, l) => t + l.price * l.qty, 0);
   const c = String(code || '').trim().toUpperCase(), d = db.discounts.find(d => d.code === c), now = Date.now();
   const no = m => Object.assign(new Error(m), { discount: true });
   if (!d || !d.active || (d.startsAt && Date.parse(d.startsAt) > now) || (d.endsAt && Date.parse(d.endsAt) < now)) throw no(`${c} isn't a valid code`);
   if (d.limit && (d.used || 0) >= d.limit) throw no(`${c} has been fully used`);
   if (d.minOrder && subtotal < d.minOrder) throw no(`${c} needs an order of ${sym()}${d.minOrder} or more`);
   if (d.oncePerCustomer && email && db.orders.some(o => o.paidAt && o.discount?.code === c && o.customer.email.toLowerCase() === email.toLowerCase())) throw no(`You've already used ${c}`);
-  const amount = d.type === 'percent' ? Math.round(subtotal * Math.min(100, d.value) / 100) : d.type === 'flat' ? Math.min(d.value, subtotal) : 0;
+  const cats = d.categories?.length ? new Set(d.categories) : null;
+  const base = cats ? lines.filter(l => cats.has(db.products.find(p => p.id === l.productId)?.category)).reduce((t, l) => t + l.price * l.qty, 0) : subtotal;
+  if (cats && !base) throw no(`${c} only works on ${[...cats].map(x => x.toLowerCase()).join(', ')}`);
+  const amount = d.type === 'percent' ? Math.round(base * Math.min(100, d.value) / 100) : d.type === 'flat' ? Math.min(d.value, base) : 0;
   return { code: c, type: d.type, amount, freeShipping: d.type === 'freeship' };
 }
 
@@ -273,7 +278,7 @@ function priceCart(items, code = '', email = '') {
   });
   const subtotal = lines.reduce((t, l) => t + l.price * l.qty, 0);
   const { shippingFee, freeShippingOver } = db.settings;
-  const discount = code ? applyDiscount(code, subtotal, email) : null;
+  const discount = code ? applyDiscount(code, lines, email) : null;
   const shipping = discount?.freeShipping || (freeShippingOver && subtotal >= freeShippingOver) ? 0 : shippingFee || 0;
   return { lines, subtotal, discount, shipping, amount: Math.max(1, subtotal - (discount?.amount || 0) + shipping) };
 }
@@ -404,7 +409,7 @@ const xml = v => String(v ?? '').replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '
 const productLink = p => `${siteUrl()}/product.html?p=${encodeURIComponent(p.slug)}`;
 const feedCache = res => res.set({ 'Cache-Control': 'public, max-age=3600', 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=3600, stale-while-revalidate=86400', 'Netlify-Cache-Tag': 'site' });
 app.get('/api/sitemap.xml', (req, res) => {
-  const pages = ['/', '/shop.html', '/about.html', '/contact.html', '/track.html', ...['shipping', 'returns', 'privacy', 'terms'].map(k => '/policy.html?p=' + k)];
+  const pages = ['/', '/shop.html', '/about.html', '/contact.html', '/track.html', ...['faq', 'shipping', 'returns', 'privacy', 'terms'].map(k => '/policy.html?p=' + k)];
   const urls = [...pages.map(u => siteUrl() + u), ...activeProducts().map(productLink)];
   feedCache(res).type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `<url><loc>${xml(u)}</loc></url>`).join('\n')}\n</urlset>\n`);
 });
@@ -415,7 +420,7 @@ app.get('/api/robots.txt', (req, res) => {
 app.get('/api/feeds/google.xml', (req, res) => {
   const items = activeProducts().flatMap(p => p.sizes.map(v => {
     const img = absImg(p.colorImages?.[v.color] || p.images.front), ok = v.stock > 0 && (!!v.sku || !I.qikinkConfigured());
-    return img && `<item><g:id>${xml(v.sku || `${p.slug}-${v.color}-${v.label}`)}</g:id><g:item_group_id>${xml(p.slug)}</g:item_group_id><g:title>${xml(`${p.name}${v.color ? ' - ' + v.color : ''} - ${v.label}`)}</g:title><g:description>${xml((p.description || p.name).slice(0, 4900))}</g:description><g:link>${xml(productLink(p) + (v.color ? '&c=' + encodeURIComponent(v.color) : ''))}</g:link><g:image_link>${xml(img)}</g:image_link><g:availability>${ok ? 'in_stock' : 'out_of_stock'}</g:availability><g:price>${(v.price || p.price).toFixed(2)} ${xml(db.settings.currency)}</g:price><g:brand>THRYFTLY</g:brand><g:condition>new</g:condition>${p.googleCategory ? `<g:google_product_category>${xml(p.googleCategory)}</g:google_product_category>` : ''}${v.color ? `<g:color>${xml(v.color)}</g:color>` : ''}<g:size>${xml(v.label)}</g:size><g:gender>unisex</g:gender><g:age_group>adult</g:age_group><g:identifier_exists>no</g:identifier_exists></item>`;
+    return img && `<item><g:id>${xml(v.sku || `${p.slug}-${v.color}-${v.label}`)}</g:id><g:item_group_id>${xml(p.slug)}</g:item_group_id><g:title>${xml(`${p.name}${v.color ? ' - ' + v.color : ''} - ${v.label}`)}</g:title><g:description>${xml((p.description || p.name).slice(0, 4900))}</g:description><g:link>${xml(productLink(p) + (v.color ? '&c=' + encodeURIComponent(v.color) : ''))}</g:link><g:image_link>${xml(img)}</g:image_link><g:availability>${ok ? 'in_stock' : 'out_of_stock'}</g:availability>${v.compare > (v.price || p.price) ? `<g:price>${v.compare.toFixed(2)} ${xml(db.settings.currency)}</g:price><g:sale_price>${(v.price || p.price).toFixed(2)} ${xml(db.settings.currency)}</g:sale_price>` : `<g:price>${(v.price || p.price).toFixed(2)} ${xml(db.settings.currency)}</g:price>`}<g:brand>THRYFTLY</g:brand><g:condition>new</g:condition>${p.googleCategory ? `<g:google_product_category>${xml(p.googleCategory)}</g:google_product_category>` : ''}${v.color ? `<g:color>${xml(v.color)}</g:color>` : ''}<g:size>${xml(v.label)}</g:size><g:gender>unisex</g:gender><g:age_group>adult</g:age_group><g:identifier_exists>no</g:identifier_exists></item>`;
   })).filter(Boolean);
   feedCache(res).type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title>THRYFTLY</title><link>${xml(siteUrl())}</link><description>THRYFTLY products</description>\n${items.join('\n')}\n</channel></rss>\n`);
 });
@@ -533,7 +538,7 @@ function readProduct(b, prev = {}) {
     badge: str(b.badge, 20).toUpperCase(), badgeStyle: b.badgeStyle === 'red' ? 'red' : 'yellow', tag: str(b.tag, 40).toUpperCase(),
     color: str(b.color, 40).toUpperCase(), fitLabel: str(b.fitLabel, 40).toUpperCase(), description: str(b.description, 2000),
     ringLabel: str(b.ringLabel, 40),
-    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 12).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0 })).filter(s => s.label),
+    sizes: (Array.isArray(b.sizes) ? b.sizes : []).slice(0, 200).map(s => ({ label: str(s.label, 12).toUpperCase(), color: str(s.color, 30).toUpperCase(), stock: Math.floor(num(s.stock, 0, 99999)), sku: str(s.sku, 50), price: num(s.price) || 0, compare: num(s.compare) || 0 })).filter(s => s.label),
     colorImages: Object.fromEntries(Object.entries(b.colorImages || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
     colorBacks: Object.fromEntries(Object.entries(b.colorBacks || {}).slice(0, 40).map(([c, u]) => [str(c, 30).toUpperCase(), imgUrl(u)]).filter(([, u]) => u)),
     specs: (Array.isArray(b.specs) ? b.specs : []).slice(0, 12).map(s => ({ k: str(s.k, 30).toUpperCase(), v: str(s.v, 120) })).filter(s => s.k),
@@ -640,7 +645,8 @@ function readDiscount(b, prev = {}) {
   const type = ['percent', 'flat', 'freeship'].includes(b.type) ? b.type : 'percent';
   const when = v => { const t = Date.parse(v); return isNaN(t) ? '' : new Date(t).toISOString(); };
   return { ...prev, code, type, value: type === 'percent' ? num(b.value, 0, 100) : num(b.value), minOrder: num(b.minOrder), limit: Math.floor(num(b.limit)), oncePerCustomer: !!b.oncePerCustomer,
-    startsAt: when(b.startsAt), endsAt: when(b.endsAt), active: !!b.active, used: prev.used || 0, note: str(b.note, 120) };
+    startsAt: when(b.startsAt), endsAt: when(b.endsAt), active: !!b.active, used: prev.used || 0, note: str(b.note, 120),
+    categories: (Array.isArray(b.categories) ? b.categories : []).map(c => str(c, 40).toUpperCase()).filter(Boolean).slice(0, 20) };
 }
 admin.get('/discounts', (req, res) => res.json(db.discounts));
 admin.post('/discounts', (req, res) => { try { const d = readDiscount(req.body, { id: id() }); db.discounts.push(d); save(); res.json(d); } catch (e) { fail(res, 400, e.message); } });
@@ -770,7 +776,7 @@ admin.post('/import/shopify', express.text({ type: '*/*', limit: '25mb' }), wrap
     const slug = r.handle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     // Match on the Shopify handle only: several Shopify products share a title.
     const prev = db.products.find(p => p.shopify?.handle === r.handle) || db.products.find(p => !p.shopify && p.slug === slug);
-    const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0 }));
+    const variants = r.variants.map(v => ({ label: v.label.slice(0, 12), color: v.color.slice(0, 30), stock: v.stock, sku: v.sku.slice(0, 50), price: v.price !== r.price ? v.price : 0, compare: v.compare || 0 }));
     const [front = '', back = '', detail = '', onBody = ''] = r.gallery.map(L);
     const fields = {
       name, price: r.price, description: r.description.slice(0, 2000), category: (r.type || categoryOf(r.title, r.productCategory)).toUpperCase().slice(0, 40),

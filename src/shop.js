@@ -154,7 +154,7 @@ export function mountChrome() {
       <div class="footer-cols">
         <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a>${authOn() ? '<a href="/account.html">MY ACCOUNT</a>' : ''}</div>
         <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
-        <div><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
+        <div><a href="/policy.html?p=faq">FAQ</a><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
       </div>
     </div>
     <div class="footer-word-wrap"><div class="footer-word" data-s="footerWord"></div></div>
@@ -186,6 +186,9 @@ export function mountChrome() {
 }
 
 /* ---------- product card (home grid + shop page) ---------- */
+// The crossed-out "was" price for the product's starting price (from Shopify's compare-at price), or 0.
+export const wasPrice = (p, v) => (v ? v.compare : p.sizes.find(s => s.price === p.price && s.compare)?.compare) || 0;
+export const percentOff = (now, was) => (was > now ? Math.round((1 - now / was) * 100) : 0);
 const sizeRange = p => {
   const sizes = [...new Set(p.sizes.filter(z => z.available).map(z => z.label))];
   return sizes.length > 3 ? `${sizes[0]}–${sizes.at(-1)}` : sizes.join('/') || 'SOLD OUT';
@@ -232,7 +235,7 @@ export function productCard(p, i) {
       <button class="pheart" type="button" data-slug="${esc(p.slug)}" aria-pressed="${saved}" aria-label="Save ${esc(p.name)}">${saved ? '♥' : '♡'}</button>
       ${buyable ? `<button class="pquick" type="button" data-slug="${esc(p.slug)}">+ QUICK ADD</button>` : ''}</div>
     <div class="pinfo"><span class="pname">${esc(p.name)}${p.edition ? ' ' + esc(p.edition.replace('/', '/ ')) : ''}</span>
-    <div class="pmeta"><span>${esc([sizeRange(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${money(p.price)}</span></div></div>
+    <div class="pmeta"><span>${esc([sizeRange(p), colorLine(p)].filter(Boolean).join(' · '))}</span><span>${wasPrice(p) ? `<s class="was">${money(wasPrice(p))}</s> ` : ''}${money(p.price)}</span></div></div>
   </a></div>`;
 }
 

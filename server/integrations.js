@@ -251,7 +251,7 @@ export function parseShopifyCsv(text) {
     const opts = [1, 2, 3].map(n => get(r, `Option${n} Value`));
     if (get(r, 'Variant SKU') || opts[0]) {
       const tracked = get(r, 'Variant Inventory Tracker') === 'shopify' && ix['Variant Inventory Qty'] != null;
-      p.variants.push({ opts, sku: get(r, 'Variant SKU'), price: Number(get(r, 'Variant Price')) || 0, stock: tracked ? Math.max(0, +get(r, 'Variant Inventory Qty') || 0) : 999, image: get(r, 'Variant Image') });
+      p.variants.push({ opts, sku: get(r, 'Variant SKU'), price: Number(get(r, 'Variant Price')) || 0, compare: Number(get(r, 'Variant Compare At Price')) || 0, stock: tracked ? Math.max(0, +get(r, 'Variant Inventory Qty') || 0) : 999, image: get(r, 'Variant Image') });
     }
   }
   return [...byHandle.values()].filter(p => p.title).map(p => {
@@ -261,7 +261,7 @@ export function parseShopifyCsv(text) {
     const variants = p.variants.map(v => ({
       color: ci >= 0 ? v.opts[ci].toUpperCase() : '',
       label: (rest.map(i => v.opts[i]).filter(Boolean).join(' / ') || 'OS').toUpperCase(),
-      sku: v.sku, price: v.price, stock: v.stock, image: v.image,
+      sku: v.sku, price: v.price, compare: v.compare > v.price ? v.compare : 0, stock: v.stock, image: v.image,
     }));
     // Shopify often lists XS last; sort sizes the way people read them, keeping colour order.
     const rank = l => { const i = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL'].indexOf(l.split(' / ')[0]); return i < 0 ? 99 : i; };

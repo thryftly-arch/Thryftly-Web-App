@@ -58,6 +58,51 @@
   status = 301
 
 [[redirects]]
+  from = "/collections/hoodies"
+  to = "/shop.html?c=HOODIES"
+  status = 301
+
+[[redirects]]
+  from = "/collections/zipper-hoodie"
+  to = "/shop.html?c=HOODIES"
+  status = 301
+
+[[redirects]]
+  from = "/collections/winterwear/*"
+  to = "/shop.html?c=HOODIES"
+  status = 301
+
+[[redirects]]
+  from = "/collections/winterwear"
+  to = "/shop.html?c=HOODIES"
+  status = 301
+
+[[redirects]]
+  from = "/collections/t-shirts"
+  to = "/shop.html?c=TEES"
+  status = 301
+
+[[redirects]]
+  from = "/collections/acid-wash"
+  to = "/shop.html?q=acid"
+  status = 301
+
+[[redirects]]
+  from = "/collections/sweatshirts"
+  to = "/shop.html?c=SWEATSHIRTS"
+  status = 301
+
+[[redirects]]
+  from = "/collections/shirts"
+  to = "/shop.html?c=SHIRTS"
+  status = 301
+
+[[redirects]]
+  from = "/collections/essentials"
+  to = "/shop.html?q=essential"
+  status = 301
+
+[[redirects]]
   from = "/collections/*"
   to = "/shop.html"
   status = 301
@@ -105,6 +150,16 @@
 [[redirects]]
   from = "/pages/about-us"
   to = "/about.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/faqs"
+  to = "/policy.html?p=faq"
+  status = 301
+
+[[redirects]]
+  from = "/pages/faq"
+  to = "/policy.html?p=faq"
   status = 301
 
 [[redirects]]

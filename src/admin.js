@@ -234,7 +234,7 @@ async function editProduct(src) {
       ${f('seoTitle', 'SEO TITLE', '', 'Google + link previews; blank = name')}${f('seoDescription', 'SEO DESCRIPTION', '', 'blank = description')}
       <label class="adm-field full">DESCRIPTION<textarea name="description">${esc(p.description)}</textarea></label>
       ${p.qikink ? `<p class="adm-note full" style="grid-column:1/-1;margin:0">QIKINK #${esc(p.qikink.productId)} · ${esc(p.qikink.baseCode)} · ${p.qikink.colors} colours · ${p.qikink.variants} variants on Qikink · cost ${esc(symbol)}${p.qikink.cost} → margin <b class="margin"></b></p>` : ''}
-      <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand. *Price only if this variant costs more than the product price.</small>
+      <div class="adm-field full sizes-box">VARIANTS — COLOUR · SIZE · STOCK · PRICE · WAS · QIKINK SKU <small>Leave colour empty if the product has one colour. Stock 999 = print on demand. *Price only if this variant costs more than the product price. WAS = the crossed-out price shown next to it (blank = no sale).</small>
         <div class="adm-row" style="grid-template-columns:1fr auto;margin:6px 0"><input class="gen-colors" placeholder="Colours, comma separated (e.g. Black, Bone, Red)"><button type="button" class="gen">MAKE COLOUR × SIZE ROWS</button></div>
         <div class="adm-rows"></div><button type="button" class="adm-add">+ ADD VARIANT</button></div>
       <div class="adm-field full specs-box">SPECS<div class="adm-rows"></div><button type="button" class="adm-add">+ ADD SPEC</button></div>
@@ -247,7 +247,7 @@ async function editProduct(src) {
   form.model3d.value = p.model3d || '';
   form.sizeChart.value = p.sizeChart || '';
   ['active', 'featured', 'inRotation'].forEach(k => (form[k].checked = !!p[k]));
-  const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'price', ph: 'Price*', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '', price: 0 }));
+  const drawVariants = rows($('.sizes-box', form), p.sizes, [{ k: 'color', ph: 'Colour', w: '120px' }, { k: 'label', ph: 'Size', w: '70px' }, { k: 'stock', ph: 'Stock', w: '80px', type: 'number' }, { k: 'price', ph: 'Price*', w: '80px', type: 'number' }, { k: 'compare', ph: 'Was', w: '80px', type: 'number' }, { k: 'sku', ph: 'Qikink SKU', w: '1fr' }], () => ({ color: '', label: '', stock: 999, sku: '', price: 0, compare: 0 }));
   // Expand colours × existing sizes, keeping any SKUs already typed in.
   $('.gen', form).addEventListener('click', () => {
     const colors = $('.gen-colors', form).value.split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
@@ -406,7 +406,7 @@ async function viewSite() {
 }
 
 /* ---------- pages ---------- */
-const PAGE_LABELS = { about: 'ABOUT', shipping: 'SHIPPING POLICY', returns: 'RETURNS & REFUNDS', privacy: 'PRIVACY POLICY', terms: 'TERMS OF SERVICE' };
+const PAGE_LABELS = { about: 'ABOUT', faq: 'FAQ', shipping: 'SHIPPING POLICY', returns: 'RETURNS & REFUNDS', privacy: 'PRIVACY POLICY', terms: 'TERMS OF SERVICE' };
 async function viewPages() {
   const pages = await req('GET', '/pages');
   main().innerHTML = `
@@ -510,13 +510,15 @@ async function viewDiscounts() {
   main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">DISCOUNTS</h1><button class="btn-red new">+ NEW CODE</button></div>
     <p class="adm-note">Codes customers type at checkout. Share a link that fills the code in for them: <b>yoursite/discount/CODE</b> (old Shopify discount links keep working). Put a code in the welcome and cart-reminder emails under Site content → Emails.</p>
     <table class="adm-table"><thead><tr><th>CODE</th><th>GIVES</th><th class="hide-sm">MIN ORDER</th><th>USED</th><th class="hide-sm">ENDS</th><th>STATUS</th><th></th></tr></thead><tbody>
-    ${list.map((d, i) => `<tr><td><b>${esc(d.code)}</b>${d.note ? `<br><small>${esc(d.note)}</small>` : ''}</td><td>${esc(dLabel(d))}</td><td class="hide-sm">${d.minOrder ? esc(symbol) + d.minOrder : '—'}</td><td>${d.used || 0}${d.limit ? ' / ' + d.limit : ''}</td><td class="hide-sm">${d.endsAt ? new Date(d.endsAt).toLocaleDateString() : '—'}</td>
+    ${list.map((d, i) => `<tr><td><b>${esc(d.code)}</b>${d.note ? `<br><small>${esc(d.note)}</small>` : ''}</td><td>${esc(dLabel(d))}${d.categories?.length ? `<br><small>on ${esc(d.categories.join(', ').toLowerCase())}</small>` : ''}</td><td class="hide-sm">${d.minOrder ? esc(symbol) + d.minOrder : '—'}</td><td>${d.used || 0}${d.limit ? ' / ' + d.limit : ''}</td><td class="hide-sm">${d.endsAt ? new Date(d.endsAt).toLocaleDateString() : '—'}</td>
       <td>${d.active && !(d.endsAt && Date.parse(d.endsAt) < Date.now()) ? '<span class="adm-pill green">ON</span>' : '<span class="adm-pill grey">OFF</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="7">No codes yet.</td></tr>'}</tbody></table>`;
   main().querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => editDiscount(list[b.dataset.i])));
   $('.new', main()).addEventListener('click', () => editDiscount({ code: '', type: 'percent', value: 10, minOrder: 0, limit: 0, oncePerCustomer: true, startsAt: '', endsAt: '', active: true, note: '' }));
 }
-function editDiscount(src) {
+async function editDiscount(src) {
   const d = structuredClone(src);
+  d.categories ||= [];
+  const cats = [...new Set((await req('GET', '/products')).map(p => p.category).filter(Boolean))].sort();
   main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">${d.id ? 'EDIT' : 'NEW'} CODE</h1><button class="btn-ghost back">← ALL CODES</button></div>
     <form class="adm-form">
       <label class="adm-field">CODE <small>letters and numbers, e.g. WELCOME10</small><input name="code" value="${esc(d.code)}" required></label>
@@ -527,6 +529,7 @@ function editDiscount(src) {
       <label class="adm-field">NOTE <small>only you see this</small><input name="note" value="${esc(d.note)}"></label>
       <label class="adm-field">STARTS <small>empty = now</small><input name="startsAt" type="datetime-local" value="${local(d.startsAt)}"></label>
       <label class="adm-field">ENDS <small>empty = never</small><input name="endsAt" type="datetime-local" value="${local(d.endsAt)}"></label>
+      <div class="adm-checks full adm-field">ONLY ON THESE CATEGORIES <small>none ticked = the whole order</small>${cats.map(c => `<label><input type="checkbox" class="dcat" value="${esc(c)}" ${d.categories.includes(c) ? 'checked' : ''}> ${esc(c)}</label>`).join('')}</div>
       <div class="adm-checks full adm-field"><label><input type="checkbox" name="active"> CODE IS ON</label><label><input type="checkbox" name="oncePerCustomer"> ONCE PER CUSTOMER (by email)</label></div>
       <div class="adm-actions">${d.id ? '<button type="button" class="adm-danger del">DELETE CODE</button>' : '<span></span>'}<button class="btn-red">SAVE CODE</button></div>
     </form>`;
@@ -537,7 +540,7 @@ function editDiscount(src) {
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
-    const body = { ...d, ...fd, active: form.active.checked, oncePerCustomer: form.oncePerCustomer.checked,
+    const body = { ...d, ...fd, active: form.active.checked, oncePerCustomer: form.oncePerCustomer.checked, categories: [...form.querySelectorAll('.dcat:checked')].map(i => i.value),
       startsAt: fd.startsAt ? new Date(fd.startsAt).toISOString() : '', endsAt: fd.endsAt ? new Date(fd.endsAt).toISOString() : '' };
     try { const saved = await req(d.id ? 'PUT' : 'POST', '/discounts' + (d.id ? '/' + d.id : ''), body); toast('SAVED'); editDiscount(saved); } catch (err) { toast(err.message, true); }
   });

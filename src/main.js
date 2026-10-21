@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track } from './shop.js';
+import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track, wasPrice, percentOff } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -117,6 +117,16 @@ if (isProduct) {
   badge.classList.add(p.badgeStyle === 'red' ? 'tag-red' : 'tag-yel');
   $('.specs').innerHTML = p.specs.map(s => `<span>${esc(s.k)}</span><span>${esc(s.v)}</span>`).join('');
   track('view_item', { items: [{ slug: p.slug, name: p.name, price: p.price }] });
+  const { freeShippingOver } = site.settings;
+  $('.tax-note').textContent = `Taxes included.${freeShippingOver ? ` Free shipping on orders over ${money(freeShippingOver)}.` : ' Free shipping.'}`;
+  // Share: the phone's share sheet (WhatsApp, Instagram…), or copy the link on desktop.
+  $('.share').addEventListener('click', async () => {
+    const url = location.origin + '/product.html?p=' + encodeURIComponent(p.slug);
+    try {
+      if (navigator.share) await navigator.share({ title: `${p.name} — THRYFTLY`, url });
+      else { await navigator.clipboard.writeText(url); $('.share').textContent = '✓'; setTimeout(() => ($('.share').textContent = '↗'), 1500); }
+    } catch { /* closed the share sheet */ }
+  });
 
   // Size chart for this kind of garment (Admin → Size charts), in a dialog. The table is typed in admin
   // as lines of comma-separated cells, headings first.
@@ -184,7 +194,9 @@ if (isProduct) {
     $$('.sizes:not(.colors) .size').forEach(b => b.addEventListener('click', () => { size = b.textContent; drawVariants(); }));
     // Variants can cost more (e.g. 3XL) and each colour can have its own mockup.
     const v = vs.find(v => v.label === size);
-    $('.p-price').textContent = money(v?.price || p.price);
+    const now = v?.price || p.price, was = v ? wasPrice(p, v) : wasPrice(p);
+    $('.p-price').textContent = money(now);
+    $('.p-split').innerHTML = was > now ? `<s>${money(was)}</s> <b class="off">${percentOff(now, was)}% OFF</b>` : '';
     showShots();
     add.disabled = !size || !!p.unlocksAt;
     if (p.unlocksAt) add.textContent = `DROPS ${new Date(p.unlocksAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).toUpperCase()}`;
