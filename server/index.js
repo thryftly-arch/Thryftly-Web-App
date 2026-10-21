@@ -80,7 +80,7 @@ const publicProduct = p => ({
   unlocksAt: lockedUntil(p.id),
   sizeChart: chartFor(p), seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
 });
-const chartFor = p => { const c = p.sizeChart && db.sizeCharts.find(c => c.key === p.sizeChart); return c && (c.image || c.note) ? { title: c.title, image: c.image, note: c.note } : null; };
+const chartFor = p => { const c = p.sizeChart && db.sizeCharts.find(c => c.key === p.sizeChart); return c && (c.image || c.note || c.table) ? { title: c.title, image: c.image, table: c.table || '', note: c.note } : null; };
 
 /* ---------------- email helpers ---------------- */
 const sym = () => db.settings.symbol || '₹';
@@ -643,7 +643,8 @@ function readChart(b, prev = {}) {
   const key = str(b.key || b.title, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!key) throw new Error('Give the size chart a name');
   if (db.sizeCharts.some(c => c.key === key && c.id !== prev.id)) throw new Error('Another size chart already uses that key');
-  return { ...prev, key, title: str(b.title || key, 40).toUpperCase(), image: imgUrl(b.image), note: str(b.note, 2000) };
+  // table: one row per line, cells split by commas, first line = headings (e.g. "SIZE, CHEST, LENGTH").
+  return { ...prev, key, title: str(b.title || key, 40).toUpperCase(), image: imgUrl(b.image), table: str(b.table, 3000), note: str(b.note, 2000) };
 }
 admin.get('/size-charts', (req, res) => res.json(db.sizeCharts.map(c => ({ ...c, products: db.products.filter(p => p.sizeChart === c.key).length }))));
 admin.post('/size-charts', (req, res) => { try { const c = readChart(req.body, { id: id() }); db.sizeCharts.push(c); save(); res.json(c); } catch (e) { fail(res, 400, e.message); } });

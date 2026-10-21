@@ -550,9 +550,9 @@ async function viewCharts() {
     <p class="adm-note">One chart per kind of garment. Products point at a chart (set on each product; the Shopify import kept your old chart types). A product page shows a SIZE CHART button once its chart has an image or measurements. Qikink's size charts for each blank are in the Qikink catalogue: screenshot or export them and upload here.</p>
     <table class="adm-table"><thead><tr><th></th><th>CHART</th><th>PRODUCTS</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${list.map((c, i) => `<tr><td><div class="adm-thumb" style="background-image:${esc(cssUrl(c.image))}"></div></td><td><b>${esc(c.title)}</b><br><small>${esc(c.key)}</small></td><td>${c.products}</td>
-      <td>${c.image || c.note ? '<span class="adm-pill green">SHOWN</span>' : '<span class="adm-pill yel">EMPTY</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="5">No size charts yet.</td></tr>'}</tbody></table>`;
+      <td>${c.image || c.note || c.table ? '<span class="adm-pill green">SHOWN</span>' : '<span class="adm-pill yel">EMPTY</span>'}</td><td><button class="adm-link" data-i="${i}">EDIT</button></td></tr>`).join('') || '<tr><td colspan="5">No size charts yet.</td></tr>'}</tbody></table>`;
   main().querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => editChart(list[b.dataset.i])));
-  $('.new', main()).addEventListener('click', () => editChart({ key: '', title: '', image: '', note: '' }));
+  $('.new', main()).addEventListener('click', () => editChart({ key: '', title: '', image: '', table: 'SIZE, CHEST, LENGTH', note: '*All measurements are in inches.' }));
 }
 function editChart(src) {
   const c = structuredClone(src);
@@ -560,7 +560,8 @@ function editChart(src) {
     <form class="adm-form">
       <label class="adm-field">NAME <small>e.g. OVERSIZED HOODIE</small><input name="title" value="${esc(c.title)}" required></label>
       <label class="adm-field">KEY <small>what products point at; blank = from the name</small><input name="key" value="${esc(c.key)}"></label>
-      <div class="adm-field full">CHART IMAGE <small>a picture of the size table</small><div class="adm-imgs"></div></div>
+      <label class="adm-field full">MEASUREMENTS TABLE <small>one row per line, cells split by commas, headings first, e.g. "SIZE, CHEST, LENGTH" then "S, 40, 27"</small><textarea name="table" style="min-height:200px;font-family:var(--mono)">${esc(c.table || '')}</textarea></label>
+      <div class="adm-field full">CHART IMAGE <small>optional, e.g. a how-to-measure picture</small><div class="adm-imgs"></div></div>
       <label class="adm-field full">MEASUREMENTS / NOTES <small>optional text under the image, e.g. "Chest 44 / 46 / 48 in. Model is 6ft wearing L."</small><textarea name="note">${esc(c.note)}</textarea></label>
       <div class="adm-actions">${c.id ? '<button type="button" class="adm-danger del">DELETE CHART</button>' : '<span></span>'}<button class="btn-red">SAVE CHART</button></div>
     </form>`;
