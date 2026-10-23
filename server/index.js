@@ -217,7 +217,10 @@ async function syncQikink() {
   const open = db.orders.filter(o => o.qikink?.order_id && o.status !== 'refunded' && !/deliver|cancel|return/i.test(o.qikinkStatus || ''));
   for (let i = 0; i < open.length; i += 10) {
     const chunk = open.slice(i, i + 10);
-    for (const q of await I.qikinkOrders({ ids: chunk.map(o => o.qikink.order_id).join(',') })) {
+    // Qikink's sandbox errors on ids=…; then ask one order at a time.
+    const found = await I.qikinkOrders({ ids: chunk.map(o => o.qikink.order_id).join(',') })
+      .catch(async () => (await Promise.all(chunk.map(o => I.qikinkOrders({ id: o.qikink.order_id }).catch(() => [])))).flat());
+    for (const q of found) {
       const o = chunk.find(o => String(o.qikink.order_id) === String(q.order_id));
       if (o) await applyQikink(o, q);
     }
