@@ -70,8 +70,16 @@ function drawOrders(orders) {
       <div class="acct-acts">
         <button class="btn-red reorder" type="button" data-n="${n}">REORDER →</button>
         ${o.tracking ? `<a class="btn-ghost" href="${esc(o.tracking.url)}" target="_blank" rel="noopener">TRACK PARCEL</a>` : `<a class="btn-ghost" href="/track.html?n=${encodeURIComponent(o.number)}">ORDER STATUS</a>`}
+        <button class="btn-ghost invoice" type="button" data-n="${n}">INVOICE ↗</button>
+        ${site.settings.exchangeDays && o.status !== 'CANCELLED & REFUNDED' ? `<a class="btn-ghost" href="/exchange.html?n=${encodeURIComponent(o.number)}">EXCHANGE</a>` : ''}
       </div>
     </article>`).join('') : '<p class="prose">No orders yet. Orders you place while signed in show up here.</p>';
+  // Invoice: same lookup as Track order (number + the email on the order), handed over on this device for 30 minutes.
+  $$('.invoice').forEach(b => b.addEventListener('click', () => {
+    const o = orders[b.dataset.n];
+    try { localStorage.setItem('thryftly_invoice', JSON.stringify({ number: o.number, email: o.email, at: Date.now() })); } catch { /* ignore */ }
+    window.open('/invoice.html', '_blank', 'noopener');
+  }));
   // Reorder: everything still on sale goes back in the cart at the same size and colour.
   $$('.reorder').forEach(b => b.addEventListener('click', () => {
     let added = 0, gone = [];

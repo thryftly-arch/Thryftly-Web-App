@@ -4,12 +4,45 @@ Storefront for THRYFTLY, which sells one-off reworked vintage. It's a small Node
 
 | Part | Where |
 |---|---|
+| Exchanges, invoices | `exchange.html`, `invoice.html`, `src/invoice.js`, `src/pages.js` |
 | Storefront (home, product, cart/checkout) | `index.html`, `product.html`, `checkout.html`, `src/main.js`, `src/checkout.js` |
 | 3D scroll motion | GSAP ScrollTrigger in `src/main.js` (`SCRUB` sets how smooth it feels) |
 | AI try-on | `src/tryon.js` (in-browser compositing) + `/api/tryon` (Ollama vision model) |
 | Admin panel | `/admin` → `admin.html`, `src/admin.js` |
 | API + server | `server/index.js` (Express), data in `DATA_DIR/db.json`, images in `DATA_DIR/uploads` |
 | Integrations | `server/integrations.js`: Qikink, Razorpay, Ollama |
+
+## Shopping features
+
+What a customer gets, besides browsing, cart and checkout:
+
+| Feature | Where | Set up in admin |
+|---|---|---|
+| **Search** with instant results (press `/` anywhere) | search icon in the header | — |
+| **Filters** by size, colour, price and in-stock, plus "top rated" sort | Shop all | — |
+| **Notify me** on a sold-out size: one email when it's back | product page, sold-out sizes | **Waitlist** tab (most-wanted sizes, CSV). Emails go out when you raise the stock in Products, and hourly |
+| **Delivery estimate** ("get it by Fri 30 Oct – Thu 5 Nov") and a **PIN code check** that names the city | product page, checkout (PIN fills city + state) | Site content → Delivery promise |
+| **Reviews** with stars, fit ("runs large"), verified-buyer badge and your replies; star ratings in Google results | product page → Reviews | **Reviews** tab. Buyers' reviews go live at once (switchable); others wait for you. Delivered emails ask for one |
+| **Exchanges & returns portal**: pick the pieces, the reason and the new size | `/exchange.html`, linked from Track order, Account, footer and the delivered email | **Returns** tab: approve / reject / done, with a message that's emailed to the customer. Window in Site content (0 = off) |
+| **Order progress** (confirmed → printing → shipped → delivered) and **invoice** download | Track order, Account | Site content → Invoices (legal name, GSTIN, GST rate) |
+| **WhatsApp button** that opens a chat (with the product link on product pages) | bottom-right, every page | Site content → WhatsApp & popup (needs the WhatsApp number under Contact) |
+| **Sign-up popup** for first-time visitors, shows the welcome code | after a delay, once per visitor | Site content → WhatsApp & popup (off by default) |
+| Product page: details / shipping / exchanges / care in fold-outs, a sticky add-to-cart bar on phones | product page | Shipping and Returns text come from Pages |
+
+**GST on invoices.** Prices include GST. With a rate set, each invoice line shows the taxable value and the tax inside it: CGST + SGST when the customer is in the same state as the address under Contact details, IGST otherwise. Rates for clothing depend on the price per piece; check the right setting with your accountant before turning it on.
+
+## Before going live
+
+- [ ] Admin → Site content: currency `INR` / `₹`, shipping fee, delivery days, exchange window, contact details (email, WhatsApp, address), invoice details.
+- [ ] Admin → Pages: replace every `[bracket]` in the policies. Razorpay checks these before it activates live payments.
+- [ ] Netlify environment variables (table below), with **live** Razorpay and Qikink keys, and `SITE_URL` set to the real domain.
+- [ ] Razorpay webhook pointing at `/api/webhooks/razorpay`.
+- [ ] Email: Admin → Site content → **Send me a test email**; then `npm run setup:auth` for the sign-in emails.
+- [ ] Place one real order with a small amount, check it reaches Qikink, then refund it from Admin → Orders.
+- [ ] Point an uptime monitor (UptimeRobot, Better Stack…) at `https://your-domain/api/health`. It answers `{"ok":true,…}` with which services are switched on.
+- [ ] Google Search Console: submit `/sitemap.xml`. Merchant Center: add `/feeds/google.xml`.
+
+Every push runs the build and `npm run check` on GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Run locally
 
@@ -29,7 +62,7 @@ npm run build
 NODE_ENV=production npm start         # serves dist/ + API on $PORT
 ```
 
-Or use Docker. Keep `/data` on a volume, because it holds the database and uploaded images:
+Or use Docker. Keep `/data` on a volume, because it holds the database and uploaded images. The image has a health check on `/api/health`:
 
 ```bash
 docker build -t thryftly .
@@ -87,7 +120,7 @@ What's different on Netlify:
 - **The AI stylist is off**, because Ollama can't run on Netlify. Try-on still places the garment over the customer's photo. To turn the stylist on, run Ollama on a machine you control and set `OLLAMA_URL` to its address.
 - The WooCommerce receiver logs go to Netlify's function log, not to `data/woo-log.jsonl`.
 
-`npm run check` tests the Supabase backend and the Netlify function against a fake Supabase on localhost (reads, changed-rows-only saves, deletes, image uploads, admin sign-in).
+`npm run check` tests payments, imports, reviews, back-in-stock alerts, exchanges, and the Supabase backend and the Netlify function against a fake Supabase on localhost (reads, changed-rows-only saves, deletes, image uploads, admin sign-in).
 
 ## Emails (from thryftly@gmail.com)
 
@@ -98,7 +131,10 @@ Every email the shop sends comes from your own address, in the THRYFTLY style:
 | Order confirmed | customer | payment goes through |
 | New order | you (`OWNER_EMAIL`) | payment goes through, with a warning if it didn't reach Qikink |
 | Shipped, with tracking link | customer | Qikink adds tracking (checked every hour) |
-| Delivered | customer | Qikink marks it delivered |
+| Delivered, with exchange + review links | customer | Qikink marks it delivered |
+| Back in stock | customer | a size they asked about can be bought again |
+| Exchange request received / decision | customer | they send a request / you approve, reject or finish it in Admin → Returns |
+| New exchange request | you | a customer sends one |
 | Refund | customer | you press **Cancel & refund** in Admin → Orders |
 | Welcome + code | customer | first time they open their account |
 | Drop list welcome + code | subscriber | they join the drop list (has an unsubscribe link) |
@@ -182,4 +218,3 @@ Ollama models can't generate photoreal try-on images. That would need a dedicate
 ## Known limits
 - Local mode keeps the database in one JSON file that is rewritten on every change, which is fine for one server process. In Supabase mode, each request reloads the whole shop (one quick query) and saves only the rows that changed. That holds up to a few thousand orders; past that, the routes should query only what they need.
 - If two customers pay for the same last item at the same moment, the second order is flagged **OVERSOLD** in Admin, and you refund it from Razorpay.
-- Order confirmation emails are not sent yet. Razorpay can email receipts: turn that on in its dashboard.

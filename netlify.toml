@@ -163,6 +163,16 @@
   status = 301
 
 [[redirects]]
+  from = "/pages/exchange*"
+  to = "/exchange.html"
+  status = 301
+
+[[redirects]]
+  from = "/pages/return*"
+  to = "/exchange.html"
+  status = 301
+
+[[redirects]]
   from = "/pages/*"
   to = "/"
   status = 301
@@ -202,6 +212,15 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
     Permissions-Policy = "camera=(self), microphone=(), geolocation=(), payment=(self \"https://api.razorpay.com\")"
+    # Same policy the Node server sends (server/index.js → helmet): only our own scripts, Razorpay, GA4 and Meta Pixel.
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://checkout.razorpay.com https://www.googletagmanager.com https://connect.facebook.net; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.razorpay.com https://*.supabase.co https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://www.facebook.com; frame-src https://api.razorpay.com https://checkout.razorpay.com; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
+
+# Customer invoices and the exchange lookup never get cached by the CDN.
+[[headers]]
+  for = "/invoice.html"
+  [headers.values]
+    Cache-Control = "private, no-store"
+    X-Robots-Tag = "noindex"
 
 # Built JS/CSS have content hashes in their names: cache them for a year.
 [[headers]]

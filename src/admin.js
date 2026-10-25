@@ -1,4 +1,6 @@
 import { $, $$, esc, cssUrl } from './shop.js';
+import { invoiceHtml } from './invoice.js';
+import invoiceCss from './invoice.css?inline';
 
 /* ---------- plumbing ---------- */
 async function req(method, path, body) {
@@ -54,7 +56,7 @@ async function boot() {
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ overview: viewOverview, discounts: viewDiscounts, charts: viewCharts, customers: viewCustomers, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs })[tab]();
+  ({ overview: viewOverview, discounts: viewDiscounts, charts: viewCharts, customers: viewCustomers, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs, returns: viewReturns, reviews: viewReviews, waitlist: viewWaitlist })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -116,6 +118,9 @@ async function viewOverview() {
       ${card('MISSING SKUs', o.noSku, 'live products with a variant that cannot be ordered', 'products')}
       ${card('DROP ALERT LIST', o.subscribers, 'emails', 'subscribers')}
       ${card('LIVE DROP', o.drop ? esc(o.drop) : 'NONE', '', 'drops')}
+      ${card('EXCHANGE REQUESTS', o.returns, 'waiting for your decision', 'returns')}
+      ${card('REVIEWS TO CHECK', o.reviews, 'from emails that never ordered the piece', 'reviews')}
+      ${card('WAITING FOR RESTOCK', o.waiting, 'back-in-stock emails queued', 'waitlist')}
     </div>
     <h2 class="adm-h" style="font-size:16px;margin:28px 0 12px">LATEST ORDERS</h2>
     <table class="adm-table"><thead><tr><th>ORDER</th><th>WHEN</th><th>CUSTOMER</th><th>TOTAL</th><th>STATUS</th></tr></thead><tbody>
@@ -286,7 +291,7 @@ async function editProduct(src) {
     const body = { ...p, ...fd, price: +fd.price, sort: +fd.sort, active: form.active.checked, featured: form.featured.checked, inRotation: form.inRotation.checked };
     try {
       const saved = await req(p.id ? 'PUT' : 'POST', '/products' + (p.id ? '/' + p.id : ''), body);
-      toast('SAVED'); editProduct(saved);
+      toast(saved.alerted ? `SAVED · ${saved.alerted} BACK-IN-STOCK EMAIL${saved.alerted > 1 ? 'S' : ''} SENT` : 'SAVED'); editProduct(saved);
     } catch (err) { toast(err.message, true); }
   });
 }
@@ -365,6 +370,10 @@ const SITE_FIELDS = [
   ['GLOBAL', [['currency', 'CURRENCY CODE', 'INR for Razorpay India; USD needs international payments enabled'], ['symbol', 'CURRENCY SYMBOL'], ['shippingFee', 'SHIPPING FEE'], ['freeShippingOver', 'FREE SHIPPING OVER', '0 = never free']]],
   ['HERO', [['kicker', 'HERO KICKER', 'small line above the headline (a live drop replaces it)'], ['mobileKicker', 'MOBILE KICKER'], ['heroTitle', 'HEADLINE'], ['heroAccent', 'HEADLINE ACCENT'], ['heroText', 'HERO TEXT', '', 'textarea'], ['ctaLabel', 'MAIN BUTTON'], ['secondaryCta', 'SECOND BUTTON']]],
   ['SECTIONS & FOOTER', [['rotationTitle', 'RING TITLE'], ['productsTitle', 'PRODUCTS HEADING'], ['signupTitle', 'SIGN-UP TITLE'], ['footerWord', 'FOOTER WORDMARK']]],
+  ['DELIVERY PROMISE', [['dispatchMin', 'PRINT + DISPATCH, MIN DAYS', 'business days', 'number'], ['dispatchMax', 'PRINT + DISPATCH, MAX DAYS', '', 'number'], ['deliveryMin', 'COURIER, MIN DAYS', 'shown as "get it by" on product pages and checkout', 'number'], ['deliveryMax', 'COURIER, MAX DAYS', '', 'number']]],
+  ['EXCHANGES & REVIEWS', [['exchangeDays', 'EXCHANGE WINDOW (DAYS)', 'after delivery; 0 turns the exchange page off', 'number'], ['reviewsAutoPublish', 'PUBLISH VERIFIED REVIEWS AT ONCE', 'reviews from people who bought the piece; others wait in Reviews', 'bool']]],
+  ['WHATSAPP & POPUP', [['whatsappButton', 'FLOATING WHATSAPP BUTTON', 'uses the WhatsApp number under Contact details', 'bool'], ['popupOn', 'SIGN-UP POPUP FOR NEW VISITORS', 'once per visitor; shows the welcome code after they join', 'bool'], ['popupDelay', 'POPUP DELAY (SECONDS)', '', 'number'], ['popupTitle', 'POPUP HEADLINE'], ['popupText', 'POPUP TEXT', '', 'textarea']]],
+  ['INVOICES', [['legalName', 'LEGAL BUSINESS NAME', 'printed on invoices'], ['gstin', 'GSTIN', 'leave blank if not GST-registered'], ['gstRate', 'GST RATE %', 'included in prices; 0 = no tax breakdown. Check the right rate with your accountant', 'number']]],
   ['EMAILS', [['welcomeCode', 'WELCOME CODE', 'shown in the welcome emails (new account, drop list). Create it under Discounts, e.g. WELCOME10'], ['reminderCode', 'CART REMINDER CODE', 'shown in the "you left something behind" email; blank = no code']]],
   ['ANALYTICS', [['ga4Id', 'GOOGLE ANALYTICS 4 ID', 'G-XXXXXXX'], ['metaPixelId', 'META PIXEL ID', 'numbers only, from Meta Events Manager']]],
 ];
@@ -373,7 +382,8 @@ async function viewSite() {
   const input = ([k, label, note, kind]) => {
     let v = s[k];
     if (kind === 'datetime') { const d = new Date(v); v = isNaN(d) ? '' : new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16); }
-    const ctl = kind === 'textarea' ? `<textarea name="${k}">${esc(v)}</textarea>` : `<input name="${k}" ${kind === 'datetime' ? 'type="datetime-local"' : ''} value="${esc(v)}">`;
+    if (kind === 'bool') return `<label class="adm-field adm-check"><input type="checkbox" name="${k}" ${v ? 'checked' : ''}> ${label}${note ? ` <small>${esc(note)}</small>` : ''}</label>`;
+    const ctl = kind === 'textarea' ? `<textarea name="${k}">${esc(v)}</textarea>` : `<input name="${k}" ${kind === 'datetime' ? 'type="datetime-local"' : kind === 'number' ? 'type="number" min="0" step="any"' : ''} value="${esc(v)}">`;
     return `<label class="adm-field">${label}${note ? ` <small>${esc(note)}</small>` : ''}${ctl}</label>`;
   };
   main().innerHTML = `
@@ -401,6 +411,7 @@ async function viewSite() {
     const body = { ...s, ...fd, marquee: marquee.map(m => m.t), socials: { instagram: fd.social_instagram, tiktok: fd.social_tiktok, discord: fd.social_discord },
       contact: { email: fd.contact_email, phone: fd.contact_phone, whatsapp: fd.contact_whatsapp, hours: fd.contact_hours, address: fd.contact_address } };
     if (fd.countdownTarget) body.countdownTarget = new Date(fd.countdownTarget).toISOString();
+    for (const [, fields] of SITE_FIELDS) for (const [k, , , kind] of fields) if (kind === 'bool') body[k] = form.elements[k].checked;
     try { const saved = await req('PUT', '/settings', body); symbol = saved.symbol; toast('SAVED — LIVE ON SITE'); } catch (err) { toast(err.message, true); }
   });
 }
@@ -474,6 +485,7 @@ async function viewOrders() {
           ${o.tracking ? `<br>Tracking: <a class="adm-link" href="${esc(o.tracking.url)}" target="_blank" rel="noopener">${esc(o.tracking.courier || 'courier')} ${esc(o.tracking.awb)}</a>` : ''}${o.fulfillmentError ? `<br><span class="red">${esc(o.fulfillmentError)}</span>` : ''}
           ${o.discount ? `<br>Discount: ${esc(o.discount.code)} (−${esc(symbol)}${o.discount.amount})` : ''}${o.refund ? `<br>Refunded ${esc(symbol)}${o.refund.amount} on ${new Date(o.refund.at).toLocaleDateString()}` : ''}
           ${o.status === 'fulfillment_failed' ? '<br><br><button class="btn-red retry">RETRY SEND TO QIKINK</button>' : ''}
+          ${o.paidAt ? '<br><br><button class="btn-ghost inv">PRINT INVOICE</button>' : ''}
           ${o.paymentId && o.status !== 'refunded' ? '<br><br><button class="adm-danger refund">CANCEL &amp; REFUND</button>' : ''}</div>
         <div>${esc(c.name)}<br>${esc(c.address1)}${c.address2 ? '<br>' + esc(c.address2) : ''}<br>${esc(c.city)}, ${esc(c.state)} ${esc(c.zip)}<br>${esc(c.phone)} · ${esc(c.email)}
           ${o.qikink ? `<pre>${esc(JSON.stringify(o.qikink, null, 1))}</pre>` : ''}</div>
@@ -482,6 +494,7 @@ async function viewOrders() {
       if (!confirm(`Refund ${symbol}${o.amount} to ${o.customer.name} through Razorpay and email them?${o.status === 'sent_to_qikink' ? '\n\nQikink already has this order: cancel it in the Qikink dashboard too.' : ''}`)) return;
       try { await req('POST', `/orders/${o.id}/refund`); toast('REFUNDED · CUSTOMER EMAILED'); viewOrders(); } catch (e) { toast(e.message, true); }
     });
+    $('.inv', el)?.addEventListener('click', () => printInvoice(o));
     $('.retry', el)?.addEventListener('click', async () => {
       try { const r = await req('POST', `/orders/${o.id}/fulfill`); toast(r.status === 'sent_to_qikink' ? 'SENT TO QIKINK' : r.fulfillmentError, r.status !== 'sent_to_qikink'); viewOrders(); } catch (e) { toast(e.message, true); }
     });
@@ -610,6 +623,91 @@ async function viewSubs() {
     a.href = URL.createObjectURL(new Blob(['email,signed_up\n' + subs.map(s => `${s.email},${s.at}`).join('\n')], { type: 'text/csv' }));
     a.download = 'thryftly-subscribers.csv'; a.click();
   });
+}
+
+/* ---------- invoice (same layout the customer gets) ---------- */
+let settingsCache = null;
+async function printInvoice(o) {
+  settingsCache ||= await req('GET', '/settings');
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups to print invoices', true);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${esc(o.number)}</title><style>${invoiceCss}</style></head><body><div class="inv-bar"><button class="inv-print" onclick="print()">PRINT / SAVE AS PDF</button></div><main class="inv">${invoiceHtml({ ...o, placed: o.createdAt }, settingsCache)}</main></body></html>`);
+  w.document.close();
+}
+
+/* ---------- exchanges & returns ---------- */
+const RSTATUS = { requested: ['NEW', 'yel'], approved: ['APPROVED', 'green'], rejected: ['REJECTED', 'grey'], completed: ['DONE', 'grey'] };
+async function viewReturns() {
+  const list = await req('GET', '/returns');
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">EXCHANGES & RETURNS</h1></div>
+    <p class="adm-note">Requests from the exchange page. Approve or reject: the customer gets an email with your message. Arrange the pickup or the replacement order in Qikink, then mark it DONE (refunds go through Orders → CANCEL &amp; REFUND).</p>
+    <div class="adm-filter"><select class="st"><option value="">Any status</option>${Object.entries(RSTATUS).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select><span class="cnt"></span></div>
+    <div class="list">${list.length ? '' : '<p class="adm-note">No requests yet.</p>'}</div>`;
+  for (const r of list) {
+    const [label, color] = RSTATUS[r.status] || [r.status, 'grey'];
+    const el = h(`<details class="adm-order"${r.status === 'requested' ? ' open' : ''}><summary><span>${esc(r.number)}</span><span>${new Date(r.at).toLocaleString()}</span><span>${esc(r.name)} · order ${esc(r.orderNumber)}</span><span>${r.type === 'return' ? 'RETURN' : 'EXCHANGE'}</span><span class="adm-pill ${color}">${label}</span></summary>
+      <div class="adm-order-body">
+        <div>${r.items.map(i => `${i.qty} × ${esc(i.name)} (${esc([i.color, i.size].filter(Boolean).join(' / '))})${i.want ? ` → <b>${esc(i.want)}</b>` : ''}<br><small>${esc(i.reason)}</small>`).join('<br>')}
+          ${r.note ? `<br><br><i>“${esc(r.note)}”</i>` : ''}<br><br><a class="adm-link" href="mailto:${esc(r.email)}?subject=${encodeURIComponent(`Your request ${r.number}`)}">${esc(r.email)}</a></div>
+        <div class="adm-form" style="padding:0">
+          <label class="adm-field full">MESSAGE TO CUSTOMER <small>included in the email (pickup date, next steps, reason)</small><textarea class="reply">${esc(r.reply || '')}</textarea></label>
+          <label class="adm-field full">PRIVATE NOTE<input class="internal" value="${esc(r.internal || '')}"></label>
+          <div class="adm-actions" style="justify-content:flex-start;flex-wrap:wrap">${['approved', 'rejected', 'completed'].map(st => `<button type="button" class="${st === 'rejected' ? 'adm-danger' : 'btn-ghost'}" data-st="${st}">${st === 'approved' ? 'APPROVE' : st === 'rejected' ? 'REJECT' : 'MARK DONE'}</button>`).join('')}<button type="button" class="btn-ghost" data-st="">SAVE NOTES</button></div>
+        </div></div></details>`);
+    el.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', async () => {
+      try {
+        const out = await req('PUT', '/returns/' + r.id, { ...(b.dataset.st && { status: b.dataset.st }), reply: $('.reply', el).value, internal: $('.internal', el).value });
+        toast(out.mailed ? 'SAVED · CUSTOMER EMAILED' : 'SAVED'); viewReturns();
+      } catch (e) { toast(e.message, true); }
+    }));
+    el._r = r;
+    $('.list', main()).append(el);
+  }
+  const filter = () => { const st = $('.st', main()).value; let n = 0; main().querySelectorAll('.adm-order').forEach(el => { el.hidden = !!st && el._r.status !== st; n += !el.hidden; }); $('.cnt', main()).textContent = `${n} OF ${list.length}`; };
+  $('.st', main()).addEventListener('input', filter); filter();
+}
+
+/* ---------- reviews ---------- */
+async function viewReviews() {
+  const list = await req('GET', '/reviews');
+  const STAT = { published: ['LIVE', 'green'], pending: ['TO CHECK', 'yel'], hidden: ['HIDDEN', 'grey'] };
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">REVIEWS</h1><button class="btn-ghost export">EXPORT CSV</button></div>
+    <p class="adm-note">Reviews from people who bought the piece (same email) are marked VERIFIED and go live straight away when that's switched on in Site content. Everything else waits here.</p>
+    <div class="adm-filter"><select class="st"><option value="">All</option>${Object.entries(STAT).map(([k, [l]]) => `<option value="${k}">${l}</option>`).join('')}</select><span class="cnt"></span></div>
+    <div class="list">${list.length ? '' : '<p class="adm-note">No reviews yet. Delivered-order emails ask customers for one.</p>'}</div>`;
+  for (const r of list) {
+    const [label, color] = STAT[r.status] || [r.status, 'grey'];
+    const el = h(`<details class="adm-order"${r.status === 'pending' ? ' open' : ''}><summary><span>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span><span>${esc(r.product)}</span><span>${esc(r.name)}${r.verified ? ' · ✓' : ''}</span><span>${new Date(r.at).toLocaleDateString()}</span><span class="adm-pill ${color}">${label}</span></summary>
+      <div class="adm-order-body"><div>${r.title ? `<b>${esc(r.title)}</b><br>` : ''}<span style="white-space:pre-wrap">${esc(r.body)}</span><br><br><small>${esc(r.email)} · ${r.verified ? 'VERIFIED BUYER' : 'no matching order'}${r.size ? ' · size ' + esc(r.size) : ''}${r.fit ? ' · fit: ' + esc(r.fit) : ''}</small></div>
+        <div class="adm-form" style="padding:0"><label class="adm-field full">PUBLIC REPLY <small>optional, shown under the review</small><textarea class="reply">${esc(r.reply || '')}</textarea></label>
+          <div class="adm-actions" style="justify-content:flex-start;flex-wrap:wrap"><button type="button" class="btn-ghost" data-st="published">PUBLISH</button><button type="button" class="btn-ghost" data-st="hidden">HIDE</button><button type="button" class="btn-ghost" data-st="">SAVE REPLY</button><button type="button" class="adm-danger del">DELETE</button></div></div></div></details>`);
+    el.querySelectorAll('[data-st]').forEach(b => b.addEventListener('click', async () => {
+      try { await req('PUT', '/reviews/' + r.id, { ...(b.dataset.st && { status: b.dataset.st }), reply: $('.reply', el).value }); toast('SAVED — LIVE ON SITE'); viewReviews(); } catch (e) { toast(e.message, true); }
+    }));
+    $('.del', el).addEventListener('click', async () => { if (confirm('Delete this review for good?')) { await req('DELETE', '/reviews/' + r.id); viewReviews(); } });
+    el._r = r;
+    $('.list', main()).append(el);
+  }
+  const filter = () => { const st = $('.st', main()).value; let n = 0; main().querySelectorAll('.adm-order').forEach(el => { el.hidden = !!st && el._r.status !== st; n += !el.hidden; }); $('.cnt', main()).textContent = `${n} OF ${list.length}`; };
+  $('.st', main()).addEventListener('input', filter); filter();
+  $('.export', main()).addEventListener('click', () => csv('thryftly-reviews.csv', [['product', 'rating', 'title', 'review', 'name', 'email', 'verified', 'status', 'date'], ...list.map(r => [r.product, r.rating, r.title, r.body, r.name, r.email, r.verified ? 'yes' : 'no', r.status, r.at])]));
+}
+
+/* ---------- back-in-stock waiting list ---------- */
+async function viewWaitlist() {
+  const list = await req('GET', '/restock');
+  const waiting = list.filter(r => !r.notifiedAt);
+  // Most-wanted variants first: a good hint for what to restock or reprint.
+  const demand = Object.values(waiting.reduce((m, r) => { const k = `${r.productId}|${r.color}|${r.size}`; (m[k] ||= { name: r.name, variant: [r.color, r.size].filter(Boolean).join(' / '), n: 0 }).n++; return m; }, {})).sort((a, b) => b.n - a.n);
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">BACK-IN-STOCK WAITLIST</h1><div style="display:flex;gap:12px;flex-wrap:wrap"><button class="btn-ghost export">EXPORT CSV</button><button class="btn-red send">SEND DUE EMAILS NOW</button></div></div>
+    <p class="adm-note">Shoppers who tapped NOTIFY ME on a sold-out size. When you raise its stock (or add its SKU) in Products, they get one email straight away. The hourly job also catches anything missed.</p>
+    <h2 class="adm-h" style="font-size:16px;margin:12px 0">MOST WANTED</h2>
+    <table class="adm-table"><thead><tr><th>PRODUCT</th><th>COLOUR / SIZE</th><th>WAITING</th></tr></thead><tbody>${demand.map(d => `<tr><td>${esc(d.name)}</td><td>${esc(d.variant)}</td><td><b>${d.n}</b></td></tr>`).join('') || '<tr><td colspan="3">Nobody waiting.</td></tr>'}</tbody></table>
+    <h2 class="adm-h" style="font-size:16px;margin:28px 0 12px">EVERY REQUEST</h2>
+    <table class="adm-table"><thead><tr><th>EMAIL</th><th>PRODUCT</th><th class="hide-sm">ASKED</th><th>STATUS</th><th></th></tr></thead><tbody>${list.map(r => `<tr><td>${esc(r.email)}</td><td>${esc(r.name)}<br><small>${esc([r.color, r.size].filter(Boolean).join(' / '))}</small></td><td class="hide-sm">${new Date(r.at).toLocaleDateString()}</td><td>${r.notifiedAt ? `<span class="adm-pill green">EMAILED</span>` : '<span class="adm-pill yel">WAITING</span>'}</td><td><button class="adm-link" data-del="${esc(r.id)}">REMOVE</button></td></tr>`).join('') || '<tr><td colspan="5">No requests yet.</td></tr>'}</tbody></table>`;
+  main().querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => { await req('DELETE', '/restock/' + b.dataset.del); viewWaitlist(); }));
+  $('.send', main()).addEventListener('click', async () => { try { toast(`SENT ${(await req('POST', '/restock/send')).sent} EMAILS`); viewWaitlist(); } catch (e) { toast(e.message, true); } });
+  $('.export', main()).addEventListener('click', () => csv('thryftly-waitlist.csv', [['email', 'product', 'colour', 'size', 'asked', 'emailed'], ...list.map(r => [r.email, r.name, r.color, r.size, r.at, r.notifiedAt || ''])]));
 }
 
 boot();

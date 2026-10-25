@@ -1,6 +1,6 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { $, $$, esc, cssUrl, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track, wasPrice, percentOff, bestOffer, setCode } from './shop.js';
+import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, addToCart, mountChrome, productCard, productUrl, catLabel, startCountdowns, dropClock, isSaved, toggleSaved, getViewed, noteViewed, track, wasPrice, percentOff, bestOffer, setCode, stars, deliveryWindow, lookupPin, richText } from './shop.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -184,15 +184,16 @@ if (isProduct) {
 
   function drawVariants() {
     const vs = p.sizes.filter(v => (v.color || '') === color);
-    if (!vs.some(v => v.label === size && v.available)) size = vs.find(v => v.available)?.label;
+    // A sold-out size can be picked on purpose (to get a back-in-stock email); otherwise start on one in stock.
+    if (!vs.some(v => v.label === size && (v.available || picked))) size = vs.find(v => v.available)?.label;
     if (colors.length) {
       $('.p-color').textContent = color;
-      $('.colors-row').innerHTML = colors.map(c => `<button class="size${c === color ? ' on' : ''}" aria-pressed="${c === color}" ${p.sizes.some(v => v.color === c && v.available) ? '' : 'disabled'}>${esc(c)}</button>`).join('');
-      $$('.colors-row .size').forEach(b => b.addEventListener('click', () => { color = b.textContent; drawVariants(); }));
+      $('.colors-row').innerHTML = colors.map(c => `<button class="size${c === color ? ' on' : ''}${p.sizes.some(v => v.color === c && v.available) ? '' : ' out'}" aria-pressed="${c === color}">${esc(c)}</button>`).join('');
+      $$('.colors-row .size').forEach(b => b.addEventListener('click', () => { color = b.textContent; picked = false; drawVariants(); }));
     }
     $('.sizes:not(.colors) .sizes-row').innerHTML = vs.map(v =>
-      `<button class="size${v.label === size ? ' on' : ''}" ${v.available ? '' : 'disabled'} aria-pressed="${v.label === size}">${esc(v.label)}</button>`).join('');
-    $$('.sizes:not(.colors) .size').forEach(b => b.addEventListener('click', () => { size = b.textContent; drawVariants(); }));
+      `<button class="size${v.label === size ? ' on' : ''}${v.available ? '' : ' out'}" aria-pressed="${v.label === size}"${v.available ? '' : ` aria-label="${esc(v.label)}, sold out: tap to get notified"`}>${esc(v.label)}</button>`).join('');
+    $$('.sizes:not(.colors) .size').forEach(b => b.addEventListener('click', () => { size = b.textContent; picked = true; drawVariants(); }));
     // Variants can cost more (e.g. 3XL) and each colour can have its own mockup.
     const v = vs.find(v => v.label === size);
     const now = v?.price || p.price, was = v ? wasPrice(p, v) : wasPrice(p);
@@ -203,14 +204,30 @@ if (isProduct) {
     po.hidden = !deal;
     if (deal) { po.dataset.code = deal.code; po.innerHTML = `GET IT FOR <b>${money(now - deal.off)}</b> WITH <b>${esc(deal.code)}</b> <span>TAP TO APPLY</span>`; }
     showShots();
-    add.disabled = !size || !!p.unlocksAt;
-    if (p.unlocksAt) add.textContent = `DROPS ${new Date(p.unlocksAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).toUpperCase()}`;
-    else if (!size) add.textContent = 'SOLD OUT';
-    else if (add.textContent === 'SOLD OUT') add.textContent = 'ADD TO CART →';
+    // Sold out (or not out yet): the button offers a back-in-stock email instead.
+    const out = !v?.available || !!p.unlocksAt;
+    add.disabled = !size && !p.unlocksAt;
+    if (p.unlocksAt) add.textContent = `DROPS ${new Date(p.unlocksAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).toUpperCase()} · NOTIFY ME`;
+    else if (!size) add.textContent = 'SOLD OUT · PICK A SIZE TO GET NOTIFIED';
+    else add.textContent = out ? 'SOLD OUT · NOTIFY ME' : 'ADD TO CART →';
+    add.classList.toggle('is-out', out);
+    $('.notify-what').textContent = [p.name, color, size].filter(Boolean).join(' / ');
+    if (!out) $('.notify').hidden = true;
+    $('.sb-price').textContent = money(now);
+    $('.sb-add').textContent = out ? 'NOTIFY ME' : 'ADD TO CART';
   }
+  let picked = false;
   drawVariants();
 
   add.addEventListener('click', async () => {
+    if (add.classList.contains('is-out')) {
+      const box = $('.notify');
+      box.hidden = false;
+      $('.notify-msg').textContent = '';
+      $('.notify-form').hidden = false;
+      $('.notify-form input[name=email]').focus();
+      return;
+    }
     addToCart(p.slug, size, color);
     gsap.fromTo('.cart-btn', { rotationY: 0 }, { rotationY: 360, transformPerspective: 400, duration: 0.6, ease: 'power2.out' });
     (await import('./extras.js')).pulse();
@@ -224,6 +241,93 @@ if (isProduct) {
   showFav();
   fav.addEventListener('click', () => { toggleSaved(p.slug); showFav(); });
   window.addEventListener('thryftly:saved', showFav);
+
+  // Back in stock: one email when this colour / size can be bought again.
+  $('.notify-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target, btn = $('button', f), m = $('.notify-msg');
+    btn.disabled = true;
+    try {
+      await api('/api/restock', { slug: p.slug, size: size || '', color, email: f.email.value, website: f.website.value });
+      try { localStorage.setItem('thryftly_email', f.email.value); } catch { /* ignore */ }
+      f.hidden = true; m.classList.remove('err');
+      m.textContent = `DONE ⚡ WE'LL EMAIL ${f.email.value.toUpperCase()} THE MOMENT IT'S BACK.`;
+    } catch (err) { m.textContent = err.message; m.classList.add('err'); }
+    btn.disabled = false;
+  });
+  try { $('.notify-form').email.value = localStorage.getItem('thryftly_email') || ''; } catch { /* ignore */ }
+
+  // Delivery estimate, and a PIN code check that names the city (remembered on this device).
+  const eta = deliveryWindow();
+  $('.pin-eta').textContent = eta ? `— GET IT BY ${eta}` : '';
+  const pinForm = $('.pin-form');
+  async function checkPin(pin) {
+    const out = $('.pin-out');
+    if (!/^[1-9]\d{5}$/.test(pin)) { out.textContent = 'ENTER A VALID 6-DIGIT PIN CODE.'; out.classList.add('err'); return; }
+    out.classList.remove('err'); out.textContent = 'CHECKING…';
+    const r = await lookupPin(pin);
+    try { localStorage.setItem('thryftly_pin', pin); } catch { /* ignore */ }
+    if (r.invalid) { out.textContent = `${pin} DOESN'T LOOK LIKE A REAL PIN CODE.`; out.classList.add('err'); return; }
+    const where = r.found ? `${r.city}, ${r.state}`.toUpperCase() : pin;
+    out.innerHTML = `✓ DELIVERS TO <b>${esc(where)}</b>${eta ? ` BY <b>${esc(eta)}</b>` : ''}. ${site.settings.freeShippingOver ? `FREE SHIPPING OVER ${money(site.settings.freeShippingOver)}.` : 'FREE SHIPPING.'}`;
+  }
+  pinForm.addEventListener('submit', e => { e.preventDefault(); checkPin(pinForm.pin.value.trim()); });
+  try { const last = localStorage.getItem('thryftly_pin'); if (last) { pinForm.pin.value = last; checkPin(last); } } catch { /* ignore */ }
+
+  // Details, shipping and exchanges, folded away under the specs.
+  const pages = site.pages, ex = site.settings.exchangeDays;
+  const firstPara = t => richText(String(t || '').split(/\n\s*\n/).filter(b => !/^#\s/.test(b.trim())).slice(0, 2).join('\n\n').replace(/\[|\]/g, ''));
+  $('.acc').innerHTML = [
+    p.description && ['DESCRIPTION', `<p>${esc(p.description)}</p>${p.fitLabel ? `<p>FIT: ${esc(p.fitLabel)}</p>` : ''}`, true],
+    ['SHIPPING', `${eta ? `<p>Order today and it arrives <b>${esc(eta)}</b> (printed to order, then shipped).</p>` : ''}${firstPara(pages.shipping?.body)}<p><a href="/policy.html?p=shipping">FULL SHIPPING POLICY →</a></p>`],
+    ['EXCHANGES & RETURNS', `${ex ? `<p>Wrong size? Ask for an exchange within <b>${ex} days</b> of delivery on our <a href="/exchange.html">exchange page</a>.</p>` : ''}${firstPara(pages.returns?.body)}<p><a href="/policy.html?p=returns">FULL POLICY →</a></p>`],
+    ['CARE', '<p>Wash inside out in cold water. Do not bleach. Dry in shade. Do not iron on the print.</p>'],
+  ].filter(Boolean).map(([t, body, open]) => `<details${open ? ' open' : ''}><summary>${t}</summary><div class="prose">${body}</div></details>`).join('');
+  if (p.description) $('.p-desc').hidden = true;
+
+  // Reviews: stars under the price, the list and a form at #reviews.
+  const rv = p.reviews || { count: 0, list: [] };
+  if (rv.count) {
+    $('.p-rating').hidden = false;
+    $('.p-rating').innerHTML = `${stars(rv.avg)} <span>${rv.avg} · ${rv.count} REVIEW${rv.count === 1 ? '' : 'S'}</span>`;
+  }
+  const FIT = { small: 'RUNS SMALL', true: 'TRUE TO SIZE', large: 'RUNS LARGE' };
+  const fits = rv.list.filter(r => r.fit), fitLine = fits.length >= 2 ? (() => { const top = Object.entries(fits.reduce((m, r) => (m[r.fit] = (m[r.fit] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1])[0]; return `${Math.round(top[1] / fits.length * 100)}% SAY ${FIT[top[0]]}`; })() : '';
+  $('.reviews').hidden = false;
+  $('.rv-top').innerHTML = rv.count
+    ? `<div class="rv-score"><b>${rv.avg}</b>${stars(rv.avg, 'lg')}<span>${rv.count} REVIEW${rv.count === 1 ? '' : 'S'}${fitLine ? ` · ${fitLine}` : ''}</span></div>
+       <div class="rv-bars">${[5, 4, 3, 2, 1].map((n, i) => `<span>${n}★</span><i style="--p:${Math.round((rv.stars[i] / rv.count) * 100)}%"></i><span>${rv.stars[i]}</span>`).join('')}</div>`
+    : '<p class="prose">NO REVIEWS YET. BOUGHT THIS ONE? BE THE FIRST TO SAY HOW IT FITS.</p>';
+  $('.rv-list').innerHTML = rv.list.map(r => `<article class="rv">
+      <div class="rv-head">${stars(r.rating)}<b>${esc(r.title || '')}</b></div>
+      <p>${esc(r.body)}</p>
+      <span class="rv-meta">${esc(r.name.toUpperCase())}${r.verified ? ' · <span class="yel">✓ VERIFIED BUYER</span>' : ''}${r.size ? ` · SIZE ${esc(r.size)}` : ''}${r.fit ? ` · ${FIT[r.fit]}` : ''} · ${new Date(r.at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}</span>
+      ${r.reply ? `<div class="rv-reply"><b>THRYFTLY:</b> ${esc(r.reply)}</div>` : ''}
+    </article>`).join('');
+  const rf = $('.rv-form');
+  rf.size.innerHTML += [...new Set(p.sizes.map(s => s.label))].map(l => `<option>${esc(l)}</option>`).join('');
+  try { rf.email.value = localStorage.getItem('thryftly_email') || ''; } catch { /* ignore */ }
+  let rating = 0;
+  const paintStars = n => $$('.rv-stars button', rf).forEach(b => { b.classList.toggle('on', +b.dataset.r <= n); b.setAttribute('aria-checked', +b.dataset.r === n); });
+  $('.rv-stars', rf).addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) paintStars(rating = +b.dataset.r); });
+  const openForm = () => { rf.hidden = false; rf.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' }); };
+  $('.rv-write').addEventListener('click', openForm);
+  if (location.hash === '#reviews') setTimeout(openForm, 400);
+  rf.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button.btn-red', rf), m = $('.co-msg', rf);
+    btn.disabled = true;
+    try {
+      const r = await api('/api/reviews', { slug: p.slug, rating, ...Object.fromEntries(new FormData(rf)) });
+      rf.innerHTML = `<h2>THANKS ⚡</h2><p class="prose">${r.status === 'published' ? 'Your review is live. Refresh to see it.' : 'We check reviews from new emails before they go live. It will show up here soon.'}</p>`;
+    } catch (err) { m.textContent = err.message; m.classList.add('err'); btn.disabled = false; }
+  });
+
+  // Phones: a buy bar sticks to the bottom once the main button scrolls away.
+  const bar = $('.sticky-buy');
+  $('.sb-name').textContent = p.name;
+  $('.sb-add').addEventListener('click', () => { add.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'center' }); if (size) add.click(); });
+  if (matchMedia('(max-width: 900px)').matches) new IntersectionObserver(([e]) => { bar.hidden = e.isIntersecting || e.boundingClientRect.top > 0; }).observe($('.buy'));
 
   // Recently viewed: what this shopper looked at before (this device), newest first.
   const seen = getViewed().filter(s => s !== p.slug).map(s => site.products.find(o => o.slug === s)).filter(Boolean).slice(0, 4);
