@@ -280,7 +280,8 @@ if (isProduct) {
   $('.acc').innerHTML = [
     p.description && ['DESCRIPTION', `<p>${esc(p.description)}</p>${p.fitLabel ? `<p>FIT: ${esc(p.fitLabel)}</p>` : ''}`, true],
     ['SHIPPING', `${eta ? `<p>Order today and it arrives <b>${esc(eta)}</b> (printed to order, then shipped).</p>` : ''}${firstPara(pages.shipping?.body)}<p><a href="/policy.html?p=shipping">FULL SHIPPING POLICY →</a></p>`],
-    ['EXCHANGES & RETURNS', `${ex ? `<p>Wrong size? Ask for an exchange within <b>${ex} days</b> of delivery on our <a href="/exchange.html">exchange page</a>.</p>` : ''}${firstPara(pages.returns?.body)}<p><a href="/policy.html?p=returns">FULL POLICY →</a></p>`],
+    // With the exchange page on, say it plainly (with the link); otherwise quote the policy's opening.
+    ['EXCHANGES & RETURNS', `${ex ? `<p>Wrong size? Exchange it within <b>${ex} days</b> of delivery on our <a href="/exchange.html">exchange page</a>. Damaged, misprinted or wrong item? We'll replace it or refund you.</p>` : firstPara(pages.returns?.body)}<p><a href="/policy.html?p=returns">FULL POLICY →</a></p>`],
     ['CARE', '<p>Wash inside out in cold water. Do not bleach. Dry in shade. Do not iron on the print.</p>'],
   ].filter(Boolean).map(([t, body, open]) => `<details${open ? ' open' : ''}><summary>${t}</summary><div class="prose">${body}</div></details>`).join('');
   if (p.description) $('.p-desc').hidden = true;
