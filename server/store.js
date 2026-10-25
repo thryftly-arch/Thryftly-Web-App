@@ -57,6 +57,26 @@ const SEED = () => ({
     ga4Id: '',
     metaPixelId: '',
     contact: { email: '', phone: '', whatsapp: '', address: '', hours: '' },
+    // Delivery promise on product pages and checkout, in business days: print + dispatch, then courier.
+    dispatchMin: 2,
+    dispatchMax: 4,
+    deliveryMin: 3,
+    deliveryMax: 6,
+    // Exchanges & returns portal (/exchange.html): days after delivery a customer can ask. 0 = portal off.
+    exchangeDays: 7,
+    // Reviews from customers who bought the piece go live at once; others wait for Admin → Reviews.
+    reviewsAutoPublish: true,
+    // Floating WhatsApp button (uses the WhatsApp number under Contact details).
+    whatsappButton: true,
+    // Sign-up popup for first-time visitors (shows the welcome code, if one is set).
+    popupOn: false,
+    popupDelay: 8,
+    popupTitle: 'GET 10% OFF YOUR FIRST ORDER',
+    popupText: 'Join the drop list: new drops before anyone else, and a code for your first order.',
+    // Invoices: business details printed on customer invoices. gstRate 0 = no tax breakdown.
+    legalName: '',
+    gstin: '',
+    gstRate: 0,
   },
   // Long-form pages, edited in Admin → Pages. Plain text: blank line = paragraph, "- " = list, "# " = heading.
   // The policies are starting drafts with [brackets] to fill in; check them before launch.
@@ -99,6 +119,9 @@ function migrate() {
   db.drops ??= [];
   db.discounts ??= [];
   db.sizeCharts ??= [];
+  db.reviews ??= [];
+  db.returns ??= [];
+  db.restock ??= [];
   // Copy that only made sense for the mockup's "Drop 07": swap it for the new defaults, but only
   // where it was never edited (still exactly the old text).
   const OLD = { liveLabel: 'DROP 07 LIVE', kicker: 'DROP 07 // STATIC SEASON // 300 UNITS', mobileKicker: 'DROP 07 // LIVE', ctaLabel: 'SHOP DROP 07 →', secondaryCta: 'VIEW LOOKBOOK', rotationTitle: 'THE ROTATION', signupTitle: 'GET THE DROP ALERT.' };
@@ -107,7 +130,7 @@ function migrate() {
 }
 
 export const db = {};
-const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers', 'discounts', 'sizeCharts'];
+const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers', 'discounts', 'sizeCharts', 'reviews', 'returns', 'restock'];
 const DOCS = ['settings', 'pages', 'importedImages', 'woo'];
 const rowId = (coll, r) => String(coll === 'subscribers' ? r.email : r.id);
 
@@ -158,6 +181,7 @@ const noteNewest = rows => { for (const r of rows) if (r.updated_at > newest) ne
 const sortLists = () => {
   const by = k => (a, b) => String(a[k]).localeCompare(String(b[k]));
   db.orders.sort(by('createdAt')); db.messages.sort(by('at')); db.subscribers.sort(by('at'));
+  db.reviews?.sort(by('at')); db.returns?.sort(by('at')); db.restock?.sort(by('at'));
 };
 // Forget the warm copy: the next load reads everything again.
 export const invalidate = () => { fullAt = 0; };

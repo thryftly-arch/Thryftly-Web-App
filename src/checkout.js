@@ -1,4 +1,4 @@
-import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome, track, offerText, getCode, setCode } from './shop.js';
+import { $, $$, esc, cssUrl, api, loadSite, money, bindSettings, getCart, setCart, mountChrome, track, offerText, getCode, setCode, deliveryWindow, lookupPin } from './shop.js';
 import { token, session, signedIn, accountApi } from './auth.js';
 
 const site = await loadSite();
@@ -26,6 +26,22 @@ if (restore) {
 }
 // Signed in with no saved details on this device: fill from their last order.
 if (signedIn() && !form.address1.value) accountApi('').then(a => { for (const [k, v] of Object.entries(a.address || {})) if (form[k] && !form[k].value) form[k].value = v; }).catch(() => {});
+
+// PIN code → city and state (only fills what's empty, or what it filled itself), plus the delivery estimate.
+const eta = deliveryWindow();
+const auto = { city: '', state: '' };
+async function onPin() {
+  const pin = form.zip.value.trim(), note = $('.co-eta');
+  if (!/^[1-9]\d{5}$/.test(pin)) { note.textContent = eta ? `ESTIMATED DELIVERY: ${eta}` : ''; return; }
+  const r = await lookupPin(pin);
+  if (pin !== form.zip.value.trim()) return; // typed on meanwhile
+  if (r.found) for (const k of ['city', 'state']) if (!form[k].value || form[k].value === auto[k]) form[k].value = auto[k] = r[k];
+  note.textContent = r.invalid ? `${pin} DOESN'T LOOK LIKE A REAL PIN CODE.` : `${r.found ? `DELIVERING TO ${r.city.toUpperCase()}` : 'ESTIMATED DELIVERY'}${eta ? `: ${eta}` : ''}`;
+  note.classList.toggle('err', !!r.invalid);
+}
+form.zip.insertAdjacentHTML('afterend', '<p class="co-eta" aria-live="polite"></p>');
+form.zip.addEventListener('input', () => { form.zip.value = form.zip.value.replace(/\D/g, '').slice(0, 6); onPin(); });
+onPin();
 
 // Discount code: from a /discount/CODE link, or typed in.
 const codeKey = 'thryftly_code';

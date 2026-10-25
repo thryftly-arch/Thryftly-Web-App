@@ -6,6 +6,8 @@
   <title>THRYFTLY</title>
   <meta name="description" content="One-off reworked vintage, charged for the street.">
   <link rel="icon" href="/favicon.svg">
+  <meta name="theme-color" content="#0A0A0B">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
@@ -44,6 +46,7 @@
       <div class="badges"><span class="tag p-badge"></span><span class="badge-ghost p-tag"></span></div>
       <h1 class="pdp-h1"><span class="p-h1a"></span><br><span class="p-h1b"></span> <span class="pdp-num p-edition"></span></h1>
       <div class="price"><span class="price-main p-price"></span><span class="price-sub p-split"></span></div>
+      <a class="p-rating" href="#reviews" hidden></a>
       <p class="tax-note"></p>
       <button type="button" class="p-offer" hidden></button>
       <p class="pdp-p p-desc"></p>
@@ -59,10 +62,43 @@
       <ul class="trust">
         <li>PREMIUM STREETWEAR FABRIC</li><li>ETHICALLY CRAFTED IN INDIA</li><li>SECURE ENCRYPTED CHECKOUT</li><li>100% AUTHENTIC THRYFTLY ORIGINAL</li>
       </ul>
+      <div class="notify" hidden>
+        <form class="notify-form">
+          <span class="sizes-label">GET AN EMAIL WHEN <b class="notify-what"></b> IS BACK</span>
+          <div class="pin-row"><input name="email" type="email" placeholder="your@email.com" autocomplete="email" required aria-label="Email"><input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"><button class="btn-red">NOTIFY ME</button></div>
+        </form>
+        <p class="co-msg notify-msg" aria-live="polite"></p>
+      </div>
+      <div class="pin">
+        <span class="sizes-label">DELIVERY <span class="pin-eta"></span></span>
+        <form class="pin-row pin-form"><input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="Enter PIN code" autocomplete="postal-code" aria-label="PIN code"><button class="btn-ghost">CHECK</button></form>
+        <p class="pin-out" aria-live="polite"></p>
+      </div>
       <button class="btn-ghost tryon-open">AI TRY-ON ⚡</button>
       <div class="specs"></div>
+      <div class="acc"></div>
     </section>
   </main>
+
+  <section class="reviews" id="reviews" hidden>
+    <div class="sec-head"><h2 class="sec-h2">REVIEWS</h2><button class="sec-meta rv-write" type="button">WRITE A REVIEW →</button></div>
+    <div class="rv-top"></div>
+    <form class="co-form rv-form" hidden>
+      <h2>YOUR REVIEW</h2>
+      <div class="rv-stars" role="radiogroup" aria-label="Rating"><button type="button" role="radio" aria-checked="false" data-r="1" aria-label="1 star">★</button><button type="button" role="radio" aria-checked="false" data-r="2" aria-label="2 stars">★</button><button type="button" role="radio" aria-checked="false" data-r="3" aria-label="3 stars">★</button><button type="button" role="radio" aria-checked="false" data-r="4" aria-label="4 stars">★</button><button type="button" role="radio" aria-checked="false" data-r="5" aria-label="5 stars">★</button></div>
+      <div class="co-row"><input name="name" placeholder="Name (shown)" autocomplete="given-name" required maxlength="40"><input name="email" type="email" placeholder="Email you ordered with (not shown)" autocomplete="email" required></div>
+      <div class="co-row"><select name="size" aria-label="Size you bought"><option value="">Size you bought</option></select>
+        <select name="fit" aria-label="How it fits"><option value="">How does it fit?</option><option value="small">Runs small</option><option value="true">True to size</option><option value="large">Runs large</option></select></div>
+      <input name="title" placeholder="Headline (optional)" maxlength="80">
+      <textarea name="body" rows="4" placeholder="How does it fit, feel and look?" required minlength="10" maxlength="1500"></textarea>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button class="btn-red">POST REVIEW →</button>
+      <p class="co-msg" aria-live="polite"></p>
+    </form>
+    <div class="rv-list"></div>
+  </section>
+
+  <div class="sticky-buy" hidden><div class="sb-info"><span class="sb-name"></span><span class="sb-price"></span></div><button class="btn-red sb-add">ADD TO CART</button></div>
 
   <section class="related" hidden>
     <div class="sec-head"><h2 class="sec-h2">YOU MIGHT ALSO LIKE</h2><a class="sec-meta" href="/shop.html">SHOP ALL →</a></div>

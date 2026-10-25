@@ -164,11 +164,13 @@ export function mountChrome() {
     <nav class="nav-links" id="nav-links">${NAV.map(([h, l]) => `<a href="${h}"${h.replace('.html', '') === here ? ' class="on" aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
     <div class="nav-right d-only">
       <span class="live"><span class="live-dot"></span><span data-s="liveLabel"></span></span>
+      <button class="search-btn" type="button" data-search aria-label="Search"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span>SEARCH</span></button>
       ${authOn() ? `<a class="acct-btn" href="/account.html">${signedIn() ? 'ACCOUNT' : 'SIGN IN'}</a>` : ''}
       <a class="saved-btn" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡ <span class="saved-count">0</span></a>
       <a class="cart-btn" href="/checkout.html" data-drawer="cart">CART [<span class="cart-count">0</span>]</a>
     </div>
     <div class="nav-mobile m-only">
+      <button class="cart-sq saved-sq" type="button" data-search aria-label="Search"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
       ${authOn() ? `<a class="cart-sq saved-sq acct-sq" href="/account.html" aria-label="${signedIn() ? 'Your account' : 'Sign in'}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" fill="none" stroke="currentColor" stroke-width="2.4"/></svg></a>` : ''}
       <a class="cart-sq saved-sq" href="/checkout.html" data-drawer="saved" aria-label="Saved pieces">♡</a>
       <a class="cart-sq" href="/checkout.html" data-drawer="cart" aria-label="Cart"><span class="cart-count">0</span></a>
@@ -180,10 +182,10 @@ export function mountChrome() {
     <div class="footer-top">
       <form class="signup">
         <span class="signup-h" data-s="signupTitle"></span>
-        <div class="signup-box"><input type="email" placeholder="your@email.com" aria-label="Email" required><button type="submit">SUBSCRIBE</button></div>
+        <div class="signup-box"><input type="email" placeholder="your@email.com" aria-label="Email" required><input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"><button type="submit">SUBSCRIBE</button></div>
       </form>
       <div class="footer-cols">
-        <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a>${authOn() ? '<a href="/account.html">MY ACCOUNT</a>' : ''}</div>
+        <div><a href="/shop.html">SHOP ALL</a><a href="/">DROPS</a><a href="/about.html">ABOUT</a><a href="/track.html">TRACK ORDER</a>${site?.settings.exchangeDays ? '<a href="/exchange.html">EXCHANGES</a>' : ''}${authOn() ? '<a href="/account.html">MY ACCOUNT</a>' : ''}</div>
         <div><a href="#" data-social="instagram" target="_blank" rel="noopener">INSTAGRAM</a><a href="#" data-social="discord" target="_blank" rel="noopener">DISCORD</a></div>
         <div><a href="/policy.html?p=faq">FAQ</a><a href="/policy.html?p=shipping">SHIPPING</a><a href="/policy.html?p=returns">RETURNS</a><a href="/policy.html?p=privacy">PRIVACY</a><a href="/policy.html?p=terms">TERMS</a><a href="/contact.html">CONTACT</a></div>
       </div>
@@ -204,7 +206,7 @@ export function mountChrome() {
     const btn = $('button', form), input = $('input', form);
     btn.disabled = true;
     try {
-      await api('/api/subscribe', { email: input.value });
+      await api('/api/subscribe', { email: input.value, website: $('.hp', form).value });
       input.value = ''; input.placeholder = "YOU'RE ON THE LIST ⚡";
     } catch (err) {
       input.setCustomValidity(err.message); input.reportValidity(); input.setCustomValidity('');
@@ -348,3 +350,26 @@ export function bindSettings(s) {
   });
   updateCartCount();
 }
+
+
+/* ---------- reviews: stars ---------- */
+export const stars = (n, cls = '') => `<span class="stars ${cls}" role="img" aria-label="${n} out of 5 stars">${[1, 2, 3, 4, 5].map(i => `<i class="${n >= i ? 'on' : n >= i - .5 ? 'half' : ''}">★</i>`).join('')}</span>`;
+
+/* ---------- delivery estimate ---------- */
+// Business days (Mon–Sat; couriers in India deliver on Saturdays) from today, after the daily cut-off at 2 pm.
+function addWorkdays(from, n) {
+  const d = new Date(from);
+  if (d.getHours() >= 14) n++;
+  while (n > 0) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0) n--; }
+  return d;
+}
+const day = d => d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+// "WED 29 OCT – SAT 1 NOV" from the dispatch + delivery days set in Admin → Site content.
+export function deliveryWindow(s = site?.settings || {}) {
+  const lo = (+s.dispatchMin || 0) + (+s.deliveryMin || 0), hi = Math.max(lo, (+s.dispatchMax || 0) + (+s.deliveryMax || 0));
+  if (!hi) return '';
+  const a = addWorkdays(Date.now(), lo), b = addWorkdays(Date.now(), hi);
+  return lo === hi ? day(a) : `${day(a)} – ${day(b)}`;
+}
+// City + state for a PIN code (India Post, through our API). Never throws: { found:false } on any problem.
+export const lookupPin = pin => api('/api/pincode/' + encodeURIComponent(pin)).catch(e => ({ found: false, error: e.message }));

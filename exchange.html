@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Exchanges &amp; returns — THRYFTLY</title>
+  <meta name="description" content="Exchange a size or return a damaged THRYFTLY piece in a few taps.">
+  <link rel="icon" href="/favicon.svg">
+  <meta name="theme-color" content="#0A0A0B">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body data-page="exchange">
+  <header class="nav" data-chrome></header>
+  <main class="page page-split">
+    <section>
+      <h1 class="page-h1">EXCHANGE <span class="volt">IT.</span></h1>
+      <p class="prose">Wrong size? Swap it within <b class="ex-days"></b> of delivery. Damaged, misprinted or wrong item? Ask for a return. Enter your order number and the email you used at checkout.</p>
+      <details class="acc-one"><summary>READ THE POLICY</summary><div class="prose ex-policy"></div></details>
+    </section>
+    <div>
+      <form class="co-form ex-find">
+        <h2>FIND YOUR ORDER</h2>
+        <input name="number" placeholder="Order number (e.g. thmx2k…)" required>
+        <input name="email" type="email" placeholder="Email" autocomplete="email" required>
+        <button class="btn-red" type="submit">FIND ORDER →</button>
+        <p class="co-msg" aria-live="polite"></p>
+      </form>
+      <div class="ex-out"></div>
+    </div>
+  </main>
+
+  <footer class="footer" data-chrome></footer>
+  <script type="module" src="/src/pages.js"></script>
+</body>
+</html>

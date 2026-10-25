@@ -40,7 +40,9 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-      connectSrc: ["'self'", 'https://*.razorpay.com', 'https://*.supabase.co', 'https://*.google-analytics.com', 'https://www.googletagmanager.com', 'https://www.facebook.com'],
+      connectSrc: ["'self'", 'https://*.razorpay.com', 'https://*.supabase.co', 'https://*.google-analytics.com', 'https://*.analytics.google.com', 'https://www.googletagmanager.com', 'https://www.facebook.com'],
+      workerSrc: ["'self'", 'blob:'],
+      frameAncestors: ["'none'"],
       frameSrc: ['https://api.razorpay.com', 'https://checkout.razorpay.com'],
       mediaSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: PROD ? [] : null,
@@ -79,6 +81,7 @@ const publicProduct = p => ({
   sizes: p.sizes.map(s => ({ label: s.label, color: s.color || '', price: s.price || p.price, compare: s.compare > (s.price || p.price) ? s.compare : 0, available: s.stock > 0 && (!!s.sku || !I.qikinkConfigured()) })),
   unlocksAt: lockedUntil(p.id),
   sizeChart: chartFor(p), seoTitle: p.seoTitle || '', seoDescription: p.seoDescription || '',
+  reviews: reviewSummary(p.id), currency: db.settings.currency,
 });
 // Products without a chart picked get one from what they are, using the same split Shopify had:
 // zip → zip hoodie; hoodies by fit; tees by fabric (acid wash / terry / classic); oversized sweatshirts and shirts.
@@ -100,7 +103,7 @@ const sym = () => db.settings.symbol || '₹';
 // Absolute image URL (emails, feeds, social previews).
 const absImg = u => (!u ? '' : u.startsWith('/uploads/') ? (S.remote ? S.fileUrl(u.slice(9)) : siteUrl() + u) : u);
 const itemImage = i => { const p = db.products.find(p => p.id === i.productId); return p ? p.colorImages?.[i.color] || p.images.front : ''; };
-const mailOrder = (to, build, o) => M.send(to, build({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg));
+const mailOrder = (to, build, o, extra) => M.send(to, build({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg, extra));
 const token = v => crypto.createHmac('sha256', SESSION_SECRET).update(v).digest('hex').slice(0, 32);
 const unsubUrl = email => `${siteUrl()}/api/unsubscribe?e=${encodeURIComponent(email)}&t=${token('unsub:' + email)}`;
 const activeProducts = () => db.products.filter(p => p.active).sort((a, b) => a.sort - b.sort);
@@ -170,6 +173,7 @@ app.get('/api/products/:slug', (req, res) => {
 });
 
 app.post('/api/subscribe', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async (req, res) => {
+  if (req.body.website) return res.json({ ok: true });
   const email = str(req.body.email, 200).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, 'Enter a valid email');
   if (!db.subscribers.some(s => s.email === email)) {
@@ -188,6 +192,7 @@ app.get('/api/unsubscribe', wrap(async (req, res) => {
 }));
 
 app.post('/api/contact', rateLimit({ windowMs: 15 * 60e3, limit: 5 }), wrap(async (req, res) => {
+  if (req.body.website) return res.json({ ok: true }); // hidden field only bots fill in
   const m = { id: id(), name: str(req.body.name, 100), email: str(req.body.email, 200).toLowerCase(), order: str(req.body.order, 30), message: str(req.body.message, 3000), at: new Date().toISOString(), read: false };
   if (!m.name || !m.message) return fail(res, 400, 'Add your name and a message');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email)) return fail(res, 400, 'Enter a valid email');
@@ -207,7 +212,11 @@ async function applyQikink(o, q) {
   o.mailed ||= {};
   const jobs = [];
   if (o.tracking?.url && !o.mailed.shipped) { o.mailed.shipped = true; jobs.push(mailOrder(o.customer.email, M.orderShipped, o)); }
-  if (/deliver/i.test(q.status || '') && !/undeliver|rto|return/i.test(q.status) && !o.mailed.delivered) { o.mailed.delivered = true; jobs.push(mailOrder(o.customer.email, M.orderDelivered, o)); }
+  if (/deliver/i.test(q.status || '') && !/undeliver|rto|return/i.test(q.status) && !o.mailed.delivered) {
+    o.mailed.delivered = true; o.deliveredAt ||= new Date().toISOString();
+    const first = db.products.find(p => p.id === o.items[0]?.productId && p.active);
+    jobs.push(mailOrder(o.customer.email, M.orderDelivered, o, { reviewUrl: first ? productLink(first) + '#reviews' : '', exchangeDays: db.settings.exchangeDays }));
+  }
   await Promise.all(jobs);
 }
 
@@ -239,12 +248,186 @@ app.post('/api/track', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), wrap(async
       o.trackedAt = Date.now(); save();
     } catch { /* show what we have */ }
   }
-  res.json({
-    number: o.number, placed: o.createdAt, amount: o.amount, currency: o.currency,
-    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(),
-    items: o.items.map(i => ({ name: i.name, size: i.size, color: i.color, qty: i.qty })),
+  res.set('Cache-Control', 'private, no-store');
+  res.json(orderForCustomer(o));
+}));
+
+/* ---------------- what a customer sees of their order (track page, invoice, exchanges) ---------------- */
+// Needs the order number AND its email, like Shopify's order status page.
+function orderForCustomer(o) {
+  return {
+    number: o.number, placed: o.createdAt, paidAt: o.paidAt || '', deliveredAt: o.deliveredAt || '', amount: o.amount, currency: o.currency,
+    subtotal: o.subtotal, shipping: o.shipping, discount: o.discount || null, refund: o.refund ? { amount: o.refund.amount, at: o.refund.at } : null,
+    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(), paid: !!o.paidAt,
+    items: o.items.map(i => ({ slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: itemImage(i) })),
+    customer: { name: o.customer.name, address1: o.customer.address1, address2: o.customer.address2, city: o.customer.city, state: o.customer.state, zip: o.customer.zip, phone: o.customer.phone.replace(/^(\d{2})\d{5}/, '$1•••••'), email: o.customer.email },
     tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
+    returns: db.returns.filter(r => r.orderId === o.id).map(r => ({ number: r.number, type: r.type, status: r.status, at: r.at, reply: r.reply || '' })),
+  };
+}
+const findOrder = (number, email) => {
+  const n = str(number, 30).toLowerCase().replace(/^#/, ''), e = str(email, 200).toLowerCase();
+  return n && e ? db.orders.find(o => o.number.toLowerCase() === n && o.customer.email.toLowerCase() === e) : null;
+};
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const available = s => s.stock > 0 && (!!s.sku || !I.qikinkConfigured());
+
+/* ---------------- health check (uptime monitors, load balancers) ---------------- */
+app.get('/api/health', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, data: S.remote ? 'supabase' : 'file', products: activeProducts().length, payments: I.razorpayConfigured(), fulfilment: I.qikinkConfigured(), email: M.mailOn(), time: new Date().toISOString() });
+}));
+
+/* ---------------- PIN code: city + state for the delivery estimate and checkout ---------------- */
+// India Post's public lookup, remembered per PIN while the server is warm. A failed lookup still
+// answers (the page shows the estimate without a city).
+const pins = new Map();
+app.get('/api/pincode/:pin', rateLimit({ windowMs: 60e3, limit: 30 }), wrap(async (req, res) => {
+  const pin = str(req.params.pin, 6);
+  if (!/^[1-9]\d{5}$/.test(pin)) return fail(res, 400, 'Enter a valid 6-digit PIN code');
+  if (!pins.has(pin)) {
+    let hit = null;
+    try {
+      const r = await fetch(`https://api.postalpincode.in/pincode/${pin}`, { signal: AbortSignal.timeout(4000) });
+      const [j] = await r.json();
+      const po = j?.Status === 'Success' && j.PostOffice?.[0];
+      hit = po ? { city: po.District, state: po.State, found: true } : { found: false, invalid: j?.Status === 'Error' };
+    } catch { hit = null; }
+    if (!hit) return res.json({ pin, found: false });
+    if (pins.size > 5000) pins.clear();
+    pins.set(pin, hit);
+  }
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.json({ pin, ...pins.get(pin) });
+}));
+
+/* ---------------- back in stock: "notify me" on sold-out sizes ---------------- */
+app.post('/api/restock', rateLimit({ windowMs: 15 * 60e3, limit: 15 }), wrap(async (req, res) => {
+  if (req.body.website) return res.json({ ok: true });
+  const email = str(req.body.email, 200).toLowerCase();
+  if (!EMAIL_RE.test(email)) return fail(res, 400, 'Enter a valid email');
+  const p = activeProducts().find(p => p.slug === str(req.body.slug, 80));
+  const size = str(req.body.size, 12).toUpperCase(), color = str(req.body.color, 30).toUpperCase();
+  const v = p?.sizes.find(s => s.label === size && (s.color || '') === color);
+  if (!v) return fail(res, 400, 'Pick a size first');
+  if (available(v) && !lockedUntil(p.id)) return fail(res, 400, "Good news: that size is in stock. Add it to your cart.");
+  const waiting = db.restock.filter(r => r.email === email && !r.notifiedAt);
+  if (waiting.length >= 20) return fail(res, 400, "You're already waiting on lots of pieces");
+  if (!waiting.some(r => r.productId === p.id && r.size === size && r.color === color)) {
+    db.restock.push({ id: id(), email, productId: p.id, slug: p.slug, name: p.name, size, color, at: new Date().toISOString() });
+    save();
+  }
+  res.json({ ok: true });
+}));
+
+// Email everyone waiting on a size that can be bought again (optionally only for one product).
+// At most 50 a run to stay inside Gmail's sending limits; the rest go next time.
+async function notifyRestock(productId) {
+  let sent = 0;
+  for (const r of db.restock.filter(r => !r.notifiedAt && (!productId || r.productId === productId))) {
+    if (sent >= 50) break;
+    const p = db.products.find(p => p.id === r.productId);
+    if (!p) { r.notifiedAt = 'gone'; continue; }
+    const v = p.sizes.find(s => s.label === r.size && (s.color || '') === r.color);
+    if (!p.active || !v || !available(v) || lockedUntil(p.id)) continue;
+    r.notifiedAt = new Date().toISOString();
+    const url = productLink(p) + (r.color ? '&c=' + encodeURIComponent(r.color) : '');
+    await M.send(r.email, M.backInStock({ name: p.name, variant: [r.color, r.size].filter(Boolean).join(' / '), url, image: absImg(p.colorImages?.[r.color] || p.images.front) }));
+    sent++;
+  }
+  if (sent || productId) save();
+  return sent;
+}
+
+/* ---------------- reviews ---------------- */
+// Published reviews on the product page. A review is "verified" when its email paid for that product.
+function reviewSummary(productId) {
+  const list = db.reviews.filter(r => r.productId === productId && r.status === 'published');
+  if (!list.length) return { count: 0, avg: 0, list: [] };
+  const avg = Math.round(list.reduce((t, r) => t + r.rating, 0) / list.length * 10) / 10;
+  return {
+    count: list.length, avg, stars: [5, 4, 3, 2, 1].map(n => list.filter(r => r.rating === n).length),
+    list: [...list].reverse().slice(0, 30).map(r => ({ name: r.name, rating: r.rating, title: r.title, body: r.body, at: r.at, verified: r.verified, size: r.size || '', fit: r.fit || '', reply: r.reply || '' })),
+  };
+}
+const boughtIt = (email, productId) => db.orders.some(o => o.paidAt && o.status !== 'refunded' && o.customer.email.toLowerCase() === email && o.items.some(i => i.productId === productId));
+app.post('/api/reviews', rateLimit({ windowMs: 60 * 60e3, limit: 6 }), wrap(async (req, res) => {
+  if (req.body.website) return res.json({ ok: true, status: 'pending' });
+  const p = activeProducts().find(p => p.slug === str(req.body.slug, 80));
+  if (!p) return fail(res, 404, 'That product is not available');
+  const r = {
+    name: str(req.body.name, 40), email: str(req.body.email, 200).toLowerCase(), rating: Math.round(num(req.body.rating, 0, 5)),
+    title: str(req.body.title, 80), body: str(req.body.body, 1500), size: str(req.body.size, 12).toUpperCase(),
+    fit: ['small', 'true', 'large'].includes(req.body.fit) ? req.body.fit : '',
+  };
+  if (!r.name) return fail(res, 400, 'Add your name');
+  if (!EMAIL_RE.test(r.email)) return fail(res, 400, 'Enter the email you ordered with');
+  if (r.rating < 1) return fail(res, 400, 'Tap a star rating');
+  if (r.body.length < 10) return fail(res, 400, 'Write a few words about it');
+  if (db.reviews.some(x => x.productId === p.id && x.email === r.email)) return fail(res, 400, "You've already reviewed this piece");
+  const verified = boughtIt(r.email, p.id);
+  const review = { id: id(), productId: p.id, slug: p.slug, product: p.name, ...r, verified, status: verified && db.settings.reviewsAutoPublish ? 'published' : 'pending', at: new Date().toISOString() };
+  db.reviews.push(review); save();
+  res.json({ ok: true, status: review.status });
+}));
+
+/* ---------------- exchanges & returns portal ---------------- */
+const REASONS = ['Too small', 'Too big', 'Damaged or misprinted', 'Wrong item received', 'Not as expected', 'Other'];
+const RETURN_REASONS = ['Damaged or misprinted', 'Wrong item received']; // policy: returns only for these; sizes are exchanged
+// Open from payment until exchangeDays after delivery (or two weeks after payment if delivery wasn't recorded).
+function returnWindow(o) {
+  const days = db.settings.exchangeDays;
+  if (!days) return { open: false, why: 'Exchanges are handled by email. Contact us with your order number.' };
+  if (!o.paidAt) return { open: false, why: "This order wasn't paid, so there's nothing to exchange." };
+  if (o.status === 'refunded') return { open: false, why: 'This order was cancelled and refunded.' };
+  const from = Date.parse(o.deliveredAt || '') || Date.parse(o.paidAt) + 14 * 864e5, until = from + days * 864e5;
+  return until < Date.now() ? { open: false, until: new Date(until).toISOString(), why: `The ${days}-day exchange window for this order closed on ${new Date(until).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}.` } : { open: true, until: new Date(until).toISOString() };
+}
+// Pieces of an order already in an open or finished request can't be asked for twice.
+const claimed = (o, index) => db.returns.filter(r => r.orderId === o.id && r.status !== 'rejected').flatMap(r => r.items).filter(i => i.index === index).reduce((t, i) => t + i.qty, 0);
+
+app.post('/api/returns/lookup', rateLimit({ windowMs: 15 * 60e3, limit: 20 }), (req, res) => {
+  const o = findOrder(req.body.number, req.body.email);
+  if (!o) return fail(res, 404, "We couldn't find that order. Check the number and the email you used at checkout.");
+  const w = returnWindow(o);
+  res.set('Cache-Control', 'private, no-store');
+  res.json({
+    ...w, number: o.number, reasons: REASONS, returnReasons: RETURN_REASONS,
+    items: o.items.map((i, index) => {
+      const p = db.products.find(p => p.id === i.productId);
+      const sizes = p ? [...new Set(p.sizes.filter(s => (s.color || '') === (i.color || '') && s.label !== i.size && available(s)).map(s => s.label))] : [];
+      return { index, name: i.name, size: i.size, color: i.color, qty: i.qty, left: Math.max(0, i.qty - claimed(o, index)), image: absImg(itemImage(i)), sizes };
+    }),
+    requests: orderForCustomer(o).returns,
   });
+});
+
+app.post('/api/returns', rateLimit({ windowMs: 15 * 60e3, limit: 10 }), wrap(async (req, res) => {
+  const o = findOrder(req.body.number, req.body.email);
+  if (!o) return fail(res, 404, "We couldn't find that order.");
+  const w = returnWindow(o);
+  if (!w.open) return fail(res, 400, w.why);
+  const type = req.body.type === 'return' ? 'return' : 'exchange';
+  const items = [];
+  for (const it of Array.isArray(req.body.items) ? req.body.items.slice(0, 20) : []) {
+    const index = Math.floor(num(it.index, 0, 99)), line = o.items[index];
+    if (!line) continue;
+    const qty = Math.floor(num(it.qty, 1, 5)), reason = REASONS.includes(it.reason) ? it.reason : '';
+    if (!reason) return fail(res, 400, `Pick a reason for ${line.name}`);
+    if (qty > line.qty - claimed(o, index)) return fail(res, 400, `${line.name} has already been requested`);
+    if (type === 'return' && !RETURN_REASONS.includes(reason)) return fail(res, 400, 'Returns are only for damaged, misprinted or wrong items. For a different size, choose an exchange.');
+    const want = type === 'exchange' ? str(it.want, 12).toUpperCase() : '';
+    if (type === 'exchange' && !want) return fail(res, 400, `Pick the size you want for ${line.name}`);
+    items.push({ index, name: line.name, size: line.size, color: line.color, qty, reason, want });
+  }
+  if (!items.length) return fail(res, 400, 'Tick at least one piece');
+  const r = {
+    id: id(), number: 'rx' + Date.now().toString(36).slice(-6) + crypto.randomBytes(1).toString('hex'), orderId: o.id, orderNumber: o.number,
+    name: o.customer.name, email: o.customer.email, type, items, note: str(req.body.note, 1000), status: 'requested', at: new Date().toISOString(),
+  };
+  db.returns.push(r); save();
+  await Promise.all([M.send(r.email, M.returnReceived(r)), M.send(M.ownerEmail(), M.returnToOwner(r), { replyTo: r.email })]);
+  res.json({ ok: true, number: r.number });
 }));
 
 /* ---------------- checkout ---------------- */
@@ -336,7 +519,7 @@ app.post('/api/checkout', rateLimit({ windowMs: 15 * 60e3, limit: 30 }), wrap(as
   res.json({ orderId: order.id, number: order.number, key: process.env.RAZORPAY_KEY_ID, razorpayOrderId: rp.id, amount: rp.amount, currency: rp.currency, customer });
 }));
 
-app.post('/api/checkout/verify', wrap(async (req, res) => {
+app.post('/api/checkout/verify', rateLimit({ windowMs: 15 * 60e3, limit: 60 }), wrap(async (req, res) => {
   const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
   const order = db.orders.find(o => o.id === orderId && o.razorpayOrderId === razorpay_order_id);
   if (!order) return fail(res, 404, 'Order not found');
@@ -388,7 +571,7 @@ const mine = u => db.orders.filter(o => o.status !== 'created' && (o.userId === 
 app.get('/api/account', needUser, wrap(async (req, res) => {
   const byId = Object.fromEntries(db.products.map(p => [p.id, p]));
   const orders = mine(req.user).reverse().map(o => ({
-    number: o.number, placed: o.createdAt, amount: o.amount,
+    number: o.number, placed: o.createdAt, amount: o.amount, email: o.customer.email,
     status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(),
     tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
     items: o.items.map(i => { const p = byId[i.productId]; return { slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: p ? p.colorImages?.[i.color] || p.images.front : '' }; }),
@@ -417,12 +600,12 @@ const xml = v => String(v ?? '').replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '
 const productLink = p => `${siteUrl()}/product.html?p=${encodeURIComponent(p.slug)}`;
 const feedCache = res => res.set({ 'Cache-Control': 'public, max-age=3600', 'Netlify-CDN-Cache-Control': 'public, durable, s-maxage=3600, stale-while-revalidate=86400', 'Netlify-Cache-Tag': 'site' });
 app.get('/api/sitemap.xml', (req, res) => {
-  const pages = ['/', '/shop.html', '/about.html', '/contact.html', '/track.html', ...['faq', 'shipping', 'returns', 'privacy', 'terms'].map(k => '/policy.html?p=' + k)];
+  const pages = ['/', '/shop.html', '/about.html', '/contact.html', '/track.html', ...(db.settings.exchangeDays ? ['/exchange.html'] : []), ...['faq', 'shipping', 'returns', 'privacy', 'terms'].map(k => '/policy.html?p=' + k)];
   const urls = [...pages.map(u => siteUrl() + u), ...activeProducts().map(productLink)];
   feedCache(res).type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `<url><loc>${xml(u)}</loc></url>`).join('\n')}\n</urlset>\n`);
 });
 app.get('/api/robots.txt', (req, res) => {
-  feedCache(res).type('text/plain').send(`User-agent: *\nDisallow: /admin\nDisallow: /checkout\nDisallow: /account\nSitemap: ${siteUrl()}/sitemap.xml\n`);
+  feedCache(res).type('text/plain').send(`User-agent: *\nDisallow: /admin\nDisallow: /checkout\nDisallow: /account\nDisallow: /invoice\nDisallow: /api/\nSitemap: ${siteUrl()}/sitemap.xml\n`);
 });
 // One entry per colour × size, grouped by product, as Merchant Center wants for apparel.
 app.get('/api/feeds/google.xml', (req, res) => {
@@ -440,6 +623,7 @@ export async function hourly() {
   try {
     await S.load();
     const synced = await syncQikink().catch(e => (console.error('qikink sync', e.message), 0));
+    const restocked = await notifyRestock().catch(e => (console.error('restock', e.message), 0));
     // A checkout that was started but never paid, 1–72 hours ago: one reminder, only for the latest
     // attempt by that email, and not if they've ordered since. At most 20 an hour (Gmail's limits).
     const now = Date.now(), at = o => Date.parse(o.createdAt);
@@ -453,7 +637,7 @@ export async function hourly() {
       if (await M.send(o.customer.email, M.cartReminder({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg, url, db.settings.reminderCode))) reminded++;
     }
     await save();
-    return { synced, reminded };
+    return { synced, reminded, restocked };
   } finally { release(); }
 }
 
@@ -499,7 +683,9 @@ admin.put('/settings', (req, res) => {
     if (!(k in req.body)) continue;
     const v = req.body[k];
     if (Array.isArray(cur)) db.settings[k] = (Array.isArray(v) ? v : []).map(x => str(x, 120)).filter(Boolean).slice(0, 20);
-    else if (typeof cur === 'number') db.settings[k] = num(v);
+    else if (typeof cur === 'boolean') db.settings[k] = v === true || v === 'true' || v === 'on';
+    else if (k === 'gstRate') db.settings[k] = num(v, 0, 28);
+    else if (typeof cur === 'number') db.settings[k] = num(v, 0, k === 'popupDelay' ? 600 : 1e7);
     else if (typeof cur === 'object') db.settings[k] = Object.fromEntries(Object.keys(cur).map(s => [s, str(v?.[s], 300)]));
     else db.settings[k] = k.endsWith('Image') ? imgUrl(v) : str(v, 600);
   }
@@ -564,20 +750,25 @@ admin.get('/products', (req, res) => res.json([...db.products].sort((a, b) => a.
 admin.post('/products', (req, res) => {
   try { const p = readProduct(req.body, { id: id() }); db.products.push(p); save(); res.json(p); } catch (e) { fail(res, 400, e.message); }
 });
-admin.put('/products/:id', (req, res) => {
+admin.put('/products/:id', wrap(async (req, res) => {
   const i = db.products.findIndex(p => p.id === req.params.id);
   if (i < 0) return fail(res, 404, 'not found');
-  try { db.products[i] = readProduct(req.body, db.products[i]); save(); res.json(db.products[i]); } catch (e) { fail(res, 400, e.message); }
-});
+  try { db.products[i] = readProduct(req.body, db.products[i]); } catch (e) { return fail(res, 400, e.message); }
+  save();
+  const alerted = await notifyRestock(db.products[i].id); // sizes back in stock: tell whoever asked
+  res.json({ ...db.products[i], alerted });
+}));
 // Bulk switch: live / grid / ring for many products at once.
-admin.patch('/products', (req, res) => {
+admin.patch('/products', wrap(async (req, res) => {
   const ids = new Set(Array.isArray(req.body.ids) ? req.body.ids : []), set = {};
   for (const k of ['active', 'featured', 'inRotation']) if (typeof req.body.set?.[k] === 'boolean') set[k] = req.body.set[k];
   if (!ids.size || !Object.keys(set).length) return fail(res, 400, 'Nothing to change');
   let changed = 0;
   for (const p of db.products) if (ids.has(p.id)) { Object.assign(p, set); changed++; }
-  save(); res.json({ changed });
-});
+  save();
+  if (set.active) await notifyRestock();
+  res.json({ changed });
+}));
 admin.delete('/products/:id', (req, res) => {
   db.products = db.products.filter(p => p.id !== req.params.id); save(); res.json({ ok: true });
 });
@@ -611,6 +802,9 @@ admin.get('/overview', (req, res) => {
     live: live.length, hidden: db.products.length - live.length,
     noSku: live.filter(p => p.sizes.some(s => !s.sku)).length,
     subscribers: db.subscribers.length, drop: liveDrops()[0]?.name || '',
+    returns: db.returns.filter(r => r.status === 'requested').length,
+    reviews: db.reviews.filter(r => r.status === 'pending').length,
+    waiting: db.restock.filter(r => !r.notifiedAt).length,
     latest: [...db.orders].reverse().slice(0, 8).map(o => ({ number: o.number, createdAt: o.createdAt, name: o.customer.name, amount: o.amount, status: o.status })),
   });
 });
@@ -644,6 +838,38 @@ admin.post('/orders/:id/refund', wrap(async (req, res) => {
   await mailOrder(o.customer.email, M.orderRefunded, o);
   res.json(o);
 }));
+
+/* reviews */
+admin.get('/reviews', (req, res) => res.json([...db.reviews].reverse()));
+admin.put('/reviews/:id', (req, res) => {
+  const r = db.reviews.find(r => r.id === req.params.id);
+  if (!r) return fail(res, 404, 'not found');
+  if (['published', 'pending', 'hidden'].includes(req.body.status)) r.status = req.body.status;
+  if ('reply' in req.body) r.reply = str(req.body.reply, 600);
+  save(); res.json(r);
+});
+admin.delete('/reviews/:id', (req, res) => { db.reviews = db.reviews.filter(r => r.id !== req.params.id); save(); res.json({ ok: true }); });
+
+/* exchanges & returns */
+admin.get('/returns', (req, res) => res.json([...db.returns].reverse()));
+admin.put('/returns/:id', wrap(async (req, res) => {
+  const r = db.returns.find(r => r.id === req.params.id);
+  if (!r) return fail(res, 404, 'not found');
+  const was = r.status;
+  if (['requested', 'approved', 'rejected', 'completed'].includes(req.body.status)) r.status = req.body.status;
+  if ('reply' in req.body) r.reply = str(req.body.reply, 600);
+  if ('internal' in req.body) r.internal = str(req.body.internal, 600);
+  r.updatedAt = new Date().toISOString();
+  save();
+  // The customer hears about every decision (not about notes-only edits).
+  const mailed = r.status !== was && r.status !== 'requested' && req.body.notify !== false ? await M.send(r.email, M.returnUpdate(r)) : false;
+  res.json({ ...r, mailed });
+}));
+
+/* back-in-stock waiting list */
+admin.get('/restock', (req, res) => res.json([...db.restock].reverse()));
+admin.delete('/restock/:id', (req, res) => { db.restock = db.restock.filter(r => r.id !== req.params.id); save(); res.json({ ok: true }); });
+admin.post('/restock/send', wrap(async (req, res) => res.json({ sent: await notifyRestock() })));
 
 /* discounts */
 function readDiscount(b, prev = {}) {
@@ -1069,7 +1295,7 @@ else app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: 
 if (PROD && !LAMBDA) {
   const dist = path.resolve('dist');
   app.use(express.static(dist, { extensions: ['html'], setHeaders: (res, f) => { if (f.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
-  app.use((req, res) => res.status(404).sendFile(path.join(dist, 'index.html')));
+  app.use((req, res) => res.status(404).sendFile(path.join(dist, '404.html')));
 }
 
 app.use((err, req, res, next) => {

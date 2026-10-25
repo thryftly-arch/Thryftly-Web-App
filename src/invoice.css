@@ -1,0 +1,24 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #e9e9ec; color: #111; font: 14px/1.5 Arial, Helvetica, sans-serif; }
+a { color: inherit; }
+.inv-bar { display: flex; gap: 16px; align-items: center; justify-content: space-between; max-width: 820px; margin: 20px auto 0; padding: 0 16px; font: 700 12px monospace; letter-spacing: .1em; }
+.inv-print { padding: 12px 18px; background: #FF3B3B; color: #fff; border: 2px solid #000; box-shadow: 4px 4px 0 #FFD84D; font: inherit; cursor: pointer; }
+.inv { max-width: 820px; margin: 16px auto 40px; background: #fff; padding: 40px; border: 2px solid #000; }
+.inv-msg { padding: 20px 0; }
+.inv-head { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; border-bottom: 3px solid #000; padding-bottom: 20px; }
+.inv-brand { font: 900 italic 26px 'Arial Black', Arial, sans-serif; letter-spacing: 2px; margin-bottom: 8px; }
+.inv-meta { text-align: right; }
+.inv-meta h1 { font: 900 22px 'Arial Black', Arial, sans-serif; letter-spacing: 2px; margin-bottom: 6px; }
+.inv-to { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin: 22px 0; }
+.inv-to h2 { width: 100%; font: 700 11px monospace; letter-spacing: .14em; color: #666; }
+.inv-table { width: 100%; border-collapse: collapse; }
+.inv-table th { text-align: left; font: 700 11px monospace; letter-spacing: .1em; border-bottom: 2px solid #000; padding: 8px 6px; }
+.inv-table td { padding: 10px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+.inv-table th:not(:first-child), .inv-table td:not(:first-child) { text-align: right; white-space: nowrap; }
+.inv-table small { display: block; color: #666; font-size: 12px; }
+.inv-table tfoot td { border: 0; padding: 5px 6px; }
+.inv-table tfoot td:first-child { text-align: right; color: #444; }
+.inv-total td { font-weight: 900; font-size: 17px; border-top: 2px solid #000 !important; padding-top: 10px !important; }
+.inv-foot { margin-top: 28px; font-size: 12px; color: #555; }
+@media (max-width: 600px) { .inv { padding: 20px 14px; } .inv-meta { text-align: left; } .inv-table { font-size: 12px; } }
+@media print { body { background: #fff; } .inv-bar { display: none; } .inv { border: 0; margin: 0; max-width: none; padding: 0; } }

@@ -85,3 +85,6 @@
 .adm-bulk { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 10px; background: var(--yel); color: #000; font: 700 11px var(--mono); letter-spacing: .08em; }
 .adm-bulk button { padding: 6px 10px; border: 2px solid #000; font: 800 10px var(--mono); letter-spacing: .08em; }
 .adm-bulk button:hover { background: #000; color: var(--yel); }
+.adm-check { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; cursor: pointer; }
+.adm-check input { width: 18px; height: 18px; accent-color: var(--red); }
+.adm-check small { flex-basis: 100%; }

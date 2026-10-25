@@ -3,7 +3,8 @@
 //   - card buttons: ♡ save and + QUICK ADD without leaving the grid
 //   - bolt-wipe page transitions between internal pages
 //   - a cursor ring that swells over anything clickable, magnetic main buttons (mouse only)
-import { $, $$, esc, cssUrl, loadSite, money, getCart, setCart, addToCart, getSaved, toggleSaved, productUrl, getCode, setCode, offerText, quoteCart } from './shop.js';
+//   - search overlay with instant results, floating WhatsApp button, first-visit sign-up popup
+import { $, $$, esc, cssUrl, api, loadSite, money, getCart, setCart, addToCart, getSaved, toggleSaved, productUrl, getCode, setCode, offerText, quoteCart, catLabel, track } from './shop.js';
 
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const BOLT = '<path d="M42 4 H88 L66 58 H92 L30 156 L46 90 H16 Z" fill="#FFD84D" stroke="#000" stroke-width="6" stroke-linejoin="round"/>';
@@ -15,8 +16,95 @@ export async function init() {
   site = await loadSite();
   drawer();
   cards();
+  search();
+  whatsapp();
+  popup();
   transitions();
   cursor();
+}
+
+/* ---------------- search overlay ---------------- */
+// Instant results from the catalogue already in the page (no extra requests). Enter opens Shop all with the query.
+function search() {
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="srch" role="dialog" aria-modal="true" aria-label="Search" hidden>
+      <form class="srch-bar" action="/shop.html"><input name="q" type="search" placeholder="SEARCH HOODIES, TEES, COLOURS…" autocomplete="off" aria-label="Search products"><button type="button" class="srch-x" aria-label="Close search">✕</button></form>
+      <div class="srch-body"></div>
+    </div>`);
+  const box = $('.srch'), input = $('input', box), body = $('.srch-body', box);
+  const cats = [...new Set(site.products.map(p => p.category))];
+  const words = p => `${p.name} ${catLabel(p.category)} ${p.category} ${p.tag} ${p.description} ${p.sizes.map(s => s.color).join(' ')}`.toLowerCase();
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) {
+      body.innerHTML = `<span class="srch-h">BROWSE</span><div class="srch-cats">${cats.map(c => `<a class="chip" href="/shop.html?c=${encodeURIComponent(c)}">${esc(catLabel(c))}</a>`).join('')}</div>`;
+      return;
+    }
+    const terms = q.split(/\s+/), hits = site.products.filter(p => terms.every(t => words(p).includes(t))).slice(0, 8);
+    body.innerHTML = hits.length
+      ? `<span class="srch-h">${hits.length} RESULT${hits.length === 1 ? '' : 'S'}</span><div class="srch-list">${hits.map(p => `<a class="srch-item" href="${productUrl(p)}"><span class="srch-img" style="background-image:${esc(cssUrl(p.images.front || Object.values(p.colorImages || {})[0]))}"></span><span><b>${esc(p.name)}</b><small>${esc(catLabel(p.category))} · ${money(p.price)}</small></span></a>`).join('')}</div>
+        <a class="btn-ghost srch-all" href="/shop.html?q=${encodeURIComponent(input.value.trim())}">SEE ALL RESULTS →</a>`
+      : `<p class="srch-none">NOTHING FOR “${esc(input.value.trim())}”. TRY A COLOUR OR “HOODIE”.</p>`;
+  };
+  let last = null;
+  const show = () => { last = document.activeElement; box.hidden = false; document.documentElement.classList.add('dr-lock'); draw(); setTimeout(() => input.focus(), 30); };
+  const hide = () => { box.hidden = true; document.documentElement.classList.remove('dr-lock'); last?.focus?.(); };
+  $$('[data-search]').forEach(b => b.addEventListener('click', show));
+  $('.srch-x', box).addEventListener('click', hide);
+  box.addEventListener('click', e => { if (e.target === box) hide(); });
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !box.hidden) hide();
+    // "/" opens search from anywhere that isn't a text field.
+    if (e.key === '/' && box.hidden && !e.target.closest('input, textarea, select, [contenteditable]')) { e.preventDefault(); show(); }
+  });
+  let t;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(draw, 80); });
+  $('.srch-bar', box).addEventListener('submit', () => track('search', {}));
+}
+
+/* ---------------- floating WhatsApp button ---------------- */
+function whatsapp() {
+  const s = site.settings, wa = String(s.contact?.whatsapp || '').replace(/\D/g, '');
+  if (!s.whatsappButton || wa.length < 10 || location.pathname.startsWith('/checkout')) return;
+  const num = wa.length === 10 ? '91' + wa : wa;
+  const text = location.pathname.startsWith('/product') ? `Hi THRYFTLY! I have a question about ${document.title.split(' — ')[0]}: ${location.href}` : 'Hi THRYFTLY! I have a question.';
+  document.body.insertAdjacentHTML('beforeend', `<a class="wa-fab" href="https://wa.me/${num}?text=${encodeURIComponent(text)}" target="_blank" rel="noopener" aria-label="Chat with us on WhatsApp">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M16 3a13 13 0 0 0-11.2 19.6L3 29l6.6-1.7A13 13 0 1 0 16 3Zm0 23.6c-2 0-4-.6-5.7-1.6l-.4-.2-3.9 1 1-3.8-.3-.4A10.6 10.6 0 1 1 16 26.6Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2l-1 1.2c-.2.2-.4.2-.7.1a8.7 8.7 0 0 1-4.3-3.8c-.3-.5.3-.5.9-1.6.1-.2 0-.4 0-.5l-1-2.4c-.3-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4-.3.3-1.1 1.1-1.1 2.7s1.2 3.2 1.3 3.4c.2.2 2.3 3.5 5.6 4.9 2.1.9 2.9 1 3.9.8.6-.1 1.9-.8 2.2-1.5.3-.8.3-1.4.2-1.5l-.9-.4Z"/></svg></a>`);
+}
+
+/* ---------------- first-visit sign-up popup ---------------- */
+// Once per visitor (remembered on this device), after the delay set in admin, never on checkout or account.
+function popup() {
+  const s = site.settings;
+  if (!s.popupOn || /^\/(checkout|account|admin|exchange|invoice)/.test(location.pathname)) return;
+  try { if (localStorage.getItem('thryftly_popup')) return; } catch { return; }
+  const seen = () => { try { localStorage.setItem('thryftly_popup', String(Date.now())); } catch { /* ignore */ } };
+  setTimeout(() => {
+    if ($('.drawer.open') || !$('.srch')?.hidden) return; // busy: try on a later page
+    document.body.insertAdjacentHTML('beforeend', `<dialog class="pop" aria-label="Join the drop list">
+      <button type="button" class="pop-x" aria-label="Close">✕</button>
+      <span class="kicker">THE DROP LIST</span>
+      <h2 class="pop-h">${esc(s.popupTitle)}</h2><p class="pop-p">${esc(s.popupText)}</p>
+      <form class="pop-form"><input type="email" name="email" placeholder="your@email.com" aria-label="Email" required><input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"><button class="btn-red">JOIN →</button></form>
+      <p class="co-msg" aria-live="polite"></p></dialog>`);
+    const d = $('.pop');
+    d.showModal(); seen();
+    const close = () => { d.close(); d.remove(); };
+    $('.pop-x', d).addEventListener('click', close);
+    d.addEventListener('click', e => { if (e.target === d) close(); });
+    $('.pop-form', d).addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = e.target, btn = $('button', f);
+      btn.disabled = true;
+      try {
+        await api('/api/subscribe', { email: f.email.value, website: f.website.value });
+        track('sign_up', {});
+        f.hidden = true;
+        $('.co-msg', d).innerHTML = s.welcomeCode ? `YOU'RE IN ⚡ YOUR CODE: <b class="pop-code">${esc(s.welcomeCode)}</b> (ALSO IN YOUR INBOX)` : "YOU'RE ON THE LIST ⚡";
+        if (s.welcomeCode) setCode(s.welcomeCode);
+      } catch (err) { $('.co-msg', d).textContent = err.message; $('.co-msg', d).classList.add('err'); btn.disabled = false; }
+    });
+  }, Math.max(2, +s.popupDelay || 8) * 1000);
 }
 
 /* ---------------- drawer ---------------- */

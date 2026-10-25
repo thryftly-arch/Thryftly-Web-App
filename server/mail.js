@@ -98,12 +98,54 @@ export const orderShipped = (o, sym, img) => ({
       + button(o.tracking?.url || trackUrl(o), 'TRACK YOUR PARCEL') + '<div style="height:18px"></div>' + itemsTable(o, sym, img) }),
 });
 
-export const orderDelivered = (o, sym, img) => ({
+// reviewUrl: the first piece's product page, opened on its review form. exchangeDays 0 = no exchange portal.
+export const orderDelivered = (o, sym, img, { reviewUrl = '', exchangeDays = 0 } = {}) => ({
   subject: `Delivered: order ${o.number}`,
   ...layout({ title: 'DELIVERED.', accent: 'WEAR IT LOUD.', preheader: `Order ${o.number} has been delivered.`,
     body: p(`Your order <b style="color:#fff;">${esc(o.number)}</b> has been delivered. We hope it hits.`)
-      + p(`Something wrong with it? Reply to this email within 7 days with a photo and we'll sort it out.`)
-      + button(`${site()}/shop.html`, 'SHOP MORE') }),
+      + (exchangeDays
+        ? p(`Wrong size, or something not right? Ask for an exchange within <b style="color:#fff;">${exchangeDays} days</b> on our exchange page.`) + button(`${site()}/exchange.html?n=${encodeURIComponent(o.number)}`, 'EXCHANGE OR RETURN') + '<div style="height:18px"></div>'
+        : p(`Something wrong with it? Reply to this email within 7 days with a photo and we'll sort it out.`))
+      + (reviewUrl ? p('Got a minute? Tell other people how it fits. A short review helps a lot.') + button(reviewUrl, 'WRITE A REVIEW') : button(`${site()}/shop.html`, 'SHOP MORE')) }),
+});
+
+// Someone asked to hear when a sold-out size came back.
+export const backInStock = ({ name, variant, url, image }) => ({
+  subject: `Back in stock: ${name}`,
+  ...layout({ title: "IT'S", accent: 'BACK.', preheader: `${name} (${variant}) is available again.`,
+    body: p(`You asked us to tell you when <b style="color:#fff;">${esc(name)}</b>${variant ? ` in <b style="color:#fff;">${esc(variant)}</b>` : ''} came back. It just did, and it won't hang around.`)
+      + (image ? `<a href="${esc(url)}"><img src="${esc(image)}" width="240" alt="" style="display:block;width:240px;max-width:100%;margin:0 0 18px;border:2px solid #000;background:#f2f2f2;"></a>` : '')
+      + button(url, 'GET IT NOW') }),
+});
+
+/* ---------- exchanges & returns ---------- */
+const RETURN_LABEL = { exchange: 'SIZE EXCHANGE', return: 'RETURN' };
+const returnLines = r => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border-top:1px solid #26262a;">${r.items.map(i => `<tr><td style="padding:8px 0;${T}font-size:14px;color:#fff;"><b>${esc(i.name)}</b><br><span style="color:#9a9aa0;font-size:12px;">${esc([i.color, i.size].filter(Boolean).join(' / '))} &times; ${i.qty}${i.want ? ` &rarr; <b style="color:#FFD84D;">${esc(i.want)}</b>` : ''} · ${esc(i.reason)}</span></td></tr>`).join('')}</table>`
+  + (r.note ? `<div style="margin:0 0 16px;padding:14px;border-left:3px solid #FFD84D;background:#0b0b0c;${T}font-size:13px;line-height:1.6;color:#c8c8cc;white-space:pre-wrap;">${esc(r.note)}</div>` : '');
+export const returnReceived = r => ({
+  subject: `We got your ${RETURN_LABEL[r.type].toLowerCase()} request for order ${r.orderNumber}`,
+  ...layout({ title: 'REQUEST', accent: 'RECEIVED.', preheader: `Request ${r.number} for order ${r.orderNumber}.`,
+    body: p(`Hi ${first(r.name)}, we've got your ${RETURN_LABEL[r.type].toLowerCase()} request <b style="color:#fff;">${esc(r.number)}</b> for order <b style="color:#fff;">${esc(r.orderNumber)}</b>. We'll check it and email you within 2 working days with the next steps.`)
+      + returnLines(r)
+      + p("Keep the piece unworn and unwashed, with its tags, until we reply. If it's damaged or misprinted, reply to this email with a photo: it speeds things up.")
+      + button(`${site()}/track.html?n=${encodeURIComponent(r.orderNumber)}`, 'SEE ORDER STATUS') }),
+});
+export const returnToOwner = r => ({
+  subject: `🔁 ${RETURN_LABEL[r.type]} request ${r.number} (order ${r.orderNumber})`,
+  ...layout({ title: 'NEW', accent: RETURN_LABEL[r.type] + '.', preheader: `${r.name}: order ${r.orderNumber}`,
+    body: p(`<b style="color:#fff;">${esc(r.name)}</b> · ${esc(r.email)} · order ${esc(r.orderNumber)}`) + returnLines(r)
+      + button(`${site()}/admin.html`, 'OPEN ADMIN → RETURNS') }),
+});
+const RETURN_NEXT = {
+  approved: (r, how) => `Good news: your request <b style="color:#fff;">${esc(r.number)}</b> is approved.` + (how ? ` ${esc(how)}` : ` We'll arrange a pickup from your address, or email you the return steps shortly.`),
+  rejected: (r, how) => `We've looked at request <b style="color:#fff;">${esc(r.number)}</b> and can't accept it this time.${how ? ` ${esc(how)}` : ''} Reply to this email if you'd like to talk it through.`,
+  completed: (r, how) => `Request <b style="color:#fff;">${esc(r.number)}</b> is done: ${r.type === 'exchange' ? 'your new size is on its way' : 'your refund has been issued'}.${how ? ` ${esc(how)}` : ''}`,
+};
+export const returnUpdate = r => ({
+  subject: `Update on request ${r.number} (order ${r.orderNumber})`,
+  ...layout({ title: 'REQUEST', accent: r.status.toUpperCase() + '.', preheader: `Your ${RETURN_LABEL[r.type].toLowerCase()} request is ${r.status}.`,
+    body: p(`Hi ${first(r.name)}, ${RETURN_NEXT[r.status](r, r.reply)}`) + returnLines(r)
+      + button(`${site()}/track.html?n=${encodeURIComponent(r.orderNumber)}`, 'SEE ORDER STATUS') }),
 });
 
 export const orderRefunded = (o, sym) => ({
