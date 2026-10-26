@@ -466,7 +466,8 @@ if (ringEl) {
 
 /* ---------- Product viewer ---------- */
 // The 3D garment viewer (garmentModel.js / garment3d.js) is switched off: prints distort when
-// wrapped onto the models. Set USE_3D = true to bring it back; nothing else needs changing.
+// wrapped onto the models. Set USE_3D = true to bring it back, and put the models' CC BY credit
+// (README → "3D garment models") back on the site: the licence requires it wherever they're shown.
 const USE_3D = false;
 const viewer = $('.viewer');
 

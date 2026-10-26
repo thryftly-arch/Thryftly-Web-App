@@ -215,6 +215,11 @@ Ollama has to be reachable from the server (`OLLAMA_URL`). If it's down, try-on 
 
 Ollama models can't generate photoreal try-on images. That would need a dedicated diffusion try-on model (such as IDM-VTON) running on a GPU server, and could be added behind the same `/api/tryon` endpoint later.
 
+## 3D garment models (switched off)
+The 3D viewer is off (`USE_3D = false` in `src/main.js`), so these models in `public/models/` aren't shown and need no credit on the site. If you switch it back on, their CC BY 4.0 licence requires this credit somewhere visible (it used to sit under the footer):
+
+> 3D garments: "T Shirt" by funlab117 (https://sketchfab.com/3d-models/t-shirt-c1a3e5eb9b5445f4b7d4be82f1127eba), "Oversized hoodie" by Mug (https://sketchfab.com/3d-models/oversized-hoodie-4f687fc4c4714de2a721e1aab2020fc8), "SWEATSHIRT" by CONCEAL (https://sketchfab.com/3d-models/sweatshirt-7c442e696c96455d848d964e79e29464). CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), simplified and recoloured.
+
 ## Known limits
 - Local mode keeps the database in one JSON file that is rewritten on every change, which is fine for one server process. In Supabase mode, each request reloads the whole shop (one quick query) and saves only the rows that changed. That holds up to a few thousand orders; past that, the routes should query only what they need.
 - If two customers pay for the same last item at the same moment, the second order is flagged **OVERSOLD** in Admin, and you refund it from Razorpay.
