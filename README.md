@@ -202,12 +202,13 @@ When an order is paid, it goes to Qikink as a prepaid order. The order number is
 
 `QIKINK_BASE_URL` is `https://sandbox.qikink.com` for testing and `https://api.qikink.com` for live. The `client_secret` is different for sandbox and live, while the ClientId is the same. Live API access has to be requested in the Qikink dashboard under Integration → Custom API. The rate limit is 60 requests per minute.
 
-**Qikink "Push to store" (new products, the Shopify way).** The site answers Qikink as a WooCommerce store, so products pushed from Qikink arrive with colours, sizes, SKUs, prices and mockups, hidden until you tick Live.
-1. In Netlify, add `WOO_CONSUMER_KEY` and `WOO_CONSUMER_SECRET` (copy them from `.env`; any long random `ck_…` / `cs_…` pair works). `SITE_URL` must be the live https address, because Qikink knows the store by it. Redeploy.
-2. On the live site, open Admin → **QIKINK PUSH**, enter your Qikink login email, press **Send OTP**, type the code from Qikink's email and press **Connect**.
-3. In Qikink → My Products, tick products → **Push to store → WooCommerce**. They appear in Admin → Products (hidden); check them, tick Live.
-
-If a push doesn't show up, Admin → QIKINK PUSH lists the last 40 requests Qikink sent. Qikink doesn't document this connection, so the first real push is the test (details in [docs/qikink-woocommerce.md](docs/qikink-woocommerce.md)). If you change the site's domain, connect again.
+**Qikink "Push to store" through a WordPress bridge (new products, the Shopify way).** Qikink pushes only to Shopify or WooCommerce, and connecting this site to Qikink directly stops at Cloudflare's bot check on Qikink's side. So a small WordPress + WooCommerce site with Qikink's official plugin receives the pushes, and this shop reads new products from it every hour (or Admin → QIKINK PUSH → **Sync now**). They arrive hidden, with colours, sizes, Qikink SKUs, prices and mockups (mockups are copied into this shop's storage). Paid orders still go straight to Qikink from this shop, so the WordPress site never gets an order and nothing is printed twice.
+1. Get a small WordPress site with HTTPS on any host; a subdomain like `sync.yourdomain` is ideal. Customers never see it.
+2. Install **WooCommerce** and Qikink's plugin (**Qikink – Print on Demand & Drop Shipping**). In Settings → Permalinks pick anything except "Plain".
+3. In the Qikink plugin page, log in with your Qikink email and OTP, then press **Approve**.
+4. WooCommerce → Settings → Advanced → REST API → **Add key** with **Read** permission.
+5. In Netlify add `WC_URL` (the WordPress address), `WC_KEY` and `WC_SECRET`, then redeploy. Admin → QIKINK PUSH should say CONNECTED.
+6. In Qikink → My Products, push products to the WooCommerce store, then **Sync now** (or wait for the hourly sync) and tick them Live in Products.
 
 ### AI try-on: Ollama, no API keys
 The garment cut-out is placed over the customer's photo in the browser. Nothing is uploaded until they press **Ask the AI stylist**. That sends the combined image to a local Ollama vision model, which replies with fit and styling notes.

@@ -10,6 +10,22 @@ const mock = http.createServer((req, res) => {
   req.on('data', c => chunks.push(c));
   req.on('end', () => {
     const body = Buffer.concat(chunks);
+    // Stand-in WordPress + WooCommerce bridge site (read key wc_k:wc_s): one variable product, two variations.
+    if (u.pathname.startsWith('/wp-json/wc/v3/')) {
+      const ok = req.headers.authorization === 'Basic ' + Buffer.from('wc_k:wc_s').toString('base64');
+      res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json', 'X-WP-Total': '1' });
+      if (!ok) return res.end(JSON.stringify({ code: 'woocommerce_rest_cannot_view', message: 'Sorry, you cannot list resources.' }));
+      if (u.pathname === '/wp-json/wc/v3/products') return res.end(JSON.stringify([{
+        id: 77, name: 'Bridge Hoodie', slug: 'bridge-hoodie', type: 'variable', status: 'publish', description: '<p>Oversized fit</p>', sku: '',
+        regular_price: '', categories: [{ id: 9, name: 'Hoodies' }], images: [{ id: 1, src: 'https://wp.example/front.jpg' }],
+        attributes: [{ id: 0, name: 'Color', options: ['Black'], variation: true }, { id: 0, name: 'Size', options: ['M', 'L'], variation: true }],
+      }]));
+      if (u.pathname === '/wp-json/wc/v3/products/77/variations') return res.end(JSON.stringify(['M', 'L'].map((z, i) => ({
+        id: 100 + i, sku: 'v-qk-' + z, regular_price: z === 'L' ? '1399' : '1299', image: { src: 'https://wp.example/black.jpg' },
+        attributes: [{ id: 0, name: 'Color', option: 'Black' }, { id: 0, name: 'Size', option: z }],
+      }))));
+      return res.end('[]');
+    }
     assert.equal(req.headers.apikey, 'sb_secret_test');
     log.push(req.method + ' ' + u.pathname);
     const send = (code, v) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(v ?? {})); };
@@ -38,6 +54,7 @@ Object.assign(process.env, {
   SUPABASE_URL: `http://127.0.0.1:${mock.address().port}`, SUPABASE_SECRET_KEY: 'sb_secret_test',
   LAMBDA_TASK_ROOT: '/var/task', ADMIN_PASSWORD: 'pw-for-check', SESSION_SECRET: 'x'.repeat(64),
   QIKINK_CLIENT_ID: '', RAZORPAY_KEY_ID: '', WOO_CONSUMER_KEY: 'ck_test', WOO_CONSUMER_SECRET: 'cs_test',
+  WC_URL: `http://127.0.0.1:${mock.address().port}`, WC_KEY: 'wc_k', WC_SECRET: 'wc_s',
 });
 const { handler } = await import('../netlify/functions/api.mjs');
 const S = await import('./store.js');
@@ -113,6 +130,19 @@ assert.equal(r.status, 201, JSON.stringify(r.json));
 const pushed = [...rows.values()].find(x => x.coll === 'products' && x.data.name === 'PUSHED TEE')?.data;
 assert.ok(pushed && pushed.active === false && pushed.price === 799 && pushed.images.front === 'https://qikink-assets.example/front.jpg', 'pushed product saved hidden, with Qikink\'s image link');
 assert.ok(rows.get('doc/wooLog')?.data.length >= 2, 'push requests logged for the admin');
+
+// WordPress bridge: the admin sync imports the new product once, hidden, with sizes, Qikink SKUs and prices.
+r = await call('GET', '/api/admin/qikink/bridge', { headers: A });
+assert.equal(r.json.wooProducts, 1, JSON.stringify(r.json));
+r = await call('POST', '/api/admin/qikink/bridge/sync', { headers: A });
+assert.equal(r.status, 200, JSON.stringify(r.json));
+assert.equal(r.json.added, 1);
+const bridged = [...rows.values()].find(x => x.coll === 'products' && x.data.woo?.bridgeId === 77)?.data;
+assert.ok(bridged && !bridged.active && bridged.category === 'HOODIES', 'imported hidden, filed under hoodies');
+assert.deepEqual(bridged.sizes.map(z => [z.color, z.label, z.sku]), [['BLACK', 'M', 'v-qk-M'], ['BLACK', 'L', 'v-qk-L']]);
+assert.equal(bridged.price, 1299, 'cheapest variation is the price');
+r = await call('POST', '/api/admin/qikink/bridge/sync', { headers: A });
+assert.equal(r.json.added, 0, 'a second sync adds nothing');
 
 assert.ok((await S.listFiles()).has(name));
 mock.close();

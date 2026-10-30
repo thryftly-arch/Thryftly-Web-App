@@ -631,6 +631,7 @@ export async function hourly() {
   try {
     await S.load();
     const synced = await syncQikink().catch(e => (console.error('qikink sync', e.message), 0));
+    const bridged = bridgeOn() ? await bridgeSync({ max: 10, until: Date.now() + 15000 }).catch(e => (console.error('bridge', e.message), null)) : null;
     const restocked = await notifyRestock().catch(e => (console.error('restock', e.message), 0));
     // A checkout that was started but never paid, 1–72 hours ago: one reminder, only for the latest
     // attempt by that email, and not if they've ordered since. At most 20 an hour (Gmail's limits).
@@ -645,7 +646,7 @@ export async function hourly() {
       if (await M.send(o.customer.email, M.cartReminder({ ...o, items: o.items.map(i => ({ ...i, image: itemImage(i) })) }, sym(), absImg, url, db.settings.reminderCode))) reminded++;
     }
     await save();
-    return { synced, reminded, restocked };
+    return { synced, bridged, reminded, restocked };
   } finally { release(); }
 }
 
@@ -1086,13 +1087,73 @@ admin.get('/qikink/woo/status', wrap(async (req, res) => res.json({
     pushed: db.products.filter(p => p.woo).map(p => ({ id: p.id, name: p.name, active: p.active, variants: p.sizes.length, at: p.woo.at || '' })),
     log: db.wooLog || [],
   })));
-admin.post('/qikink/woo/connect', wrap(async (req, res) => res.json(await I.qikinkPlugin('wp_plugin', { EmailId: str(req.body.email, 200), store_url: siteUrl() }))));
-admin.post('/qikink/woo/otp', wrap(async (req, res) => {
-  if (!wooKeys()) return fail(res, 503, 'Set WOO_CONSUMER_KEY and WOO_CONSUMER_SECRET first');
-  const client_id = str(req.body.client_id, 40);
-  const r = await I.qikinkPlugin('wp_plugin_otp', { otp: str(req.body.otp, 10), client_id });
-  if (!r.status) return fail(res, 400, 'Qikink rejected the OTP');
-  res.json({ keys: await I.qikinkPluginSendKeys(client_id, process.env.WOO_CONSUMER_KEY, process.env.WOO_CONSUMER_SECRET) });
+// (Connecting this site directly, email → OTP → keys, stops at Qikink's Cloudflare bot check on the
+// keys step, so products come through the WordPress bridge below instead.)
+
+/* ---------------- Qikink products via a WordPress bridge ---------------- */
+// Qikink pushes only to Shopify / WooCommerce. A small WordPress + WooCommerce site with Qikink's official
+// plugin receives the pushes; this shop reads new products from it over WooCommerce's REST API (read-only
+// key) and adds them hidden: colours, sizes, Qikink SKUs, prices, mockups. Paid orders still go straight to
+// Qikink from here, so the WordPress site never sees an order.
+// WC_URL = the WordPress site (https://…), WC_KEY / WC_SECRET = a Read key from WooCommerce → Settings → Advanced → REST API.
+const bridgeOn = () => !!(process.env.WC_URL && process.env.WC_KEY && process.env.WC_SECRET);
+const bridgeUrl = () => (process.env.WC_URL || '').replace(/\/+$/, '');
+async function wc(pathq) {
+  const res = await fetch(`${bridgeUrl()}/wp-json/wc/v3${pathq}`, {
+    headers: { Authorization: 'Basic ' + Buffer.from(`${process.env.WC_KEY}:${process.env.WC_SECRET}`).toString('base64'), Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const text = await res.text();
+  let j; try { j = JSON.parse(text); } catch { throw new Error(`WordPress site answered with a web page (${res.status}), not WooCommerce: check WC_URL and that permalinks aren't "Plain"`); }
+  if (!res.ok) throw new Error(`WooCommerce: ${j.message || res.status}`);
+  return { j, total: +res.headers.get('x-wp-total') || 0 };
+}
+// Products on the WordPress site that aren't here yet; at most `max` imported per call (Netlify time limits).
+async function bridgeSync({ max = 2, until = Date.now() + 7000 } = {}) {
+  const have = new Set(db.products.filter(p => p.woo?.bridgeId).map(p => p.woo.bridgeId));
+  const all = [];
+  for (let page = 1; page < 30; page++) {
+    const { j } = await wc(`/products?per_page=100&page=${page}&status=any&orderby=id&order=asc`);
+    all.push(...j);
+    if (j.length < 100) break;
+  }
+  const todo = all.filter(x => !have.has(x.id));
+  let added = 0;
+  for (const x of todo) {
+    if (added >= max || Date.now() > until) break;
+    const vars = x.type === 'variable' ? (await wc(`/products/${x.id}/variations?per_page=100`)).j : [];
+    const p = await wooUpsertProduct(x);
+    p.woo.bridgeId = x.id;
+    for (const v of vars) await wooUpsertVariation(p, v);
+    added++;
+  }
+  const copied = await copyBridgeImages(until);
+  if (added || copied) await save();
+  return { added, remaining: todo.length - added, total: all.length, copied };
+}
+// The mockups start out on the WordPress site; copy them into this shop's storage while time allows,
+// so the shop doesn't depend on that site to show images.
+async function copyBridgeImages(until) {
+  let copied = 0;
+  for (const p of db.products.filter(p => p.woo?.bridgeId)) {
+    for (const [obj, k] of [...Object.keys(p.images).map(k => [p.images, k]), ...Object.keys(p.colorImages).map(k => [p.colorImages, k])]) {
+      if (Date.now() > until) return copied;
+      const u = obj[k];
+      if (!u || u.startsWith('/uploads/')) continue;
+      const got = await localImage(u);
+      if (got !== u) { obj[k] = got; copied++; }
+    }
+  }
+  return copied;
+}
+admin.get('/qikink/bridge', wrap(async (req, res) => {
+  const out = { configured: bridgeOn(), url: bridgeUrl(), imported: db.products.filter(p => p.woo?.bridgeId).map(p => ({ id: p.id, name: p.name, active: p.active, variants: p.sizes.length, at: p.woo.at || '' })) };
+  if (out.configured) { try { out.wooProducts = (await wc('/products?per_page=1&status=any')).total; } catch (e) { out.error = e.message; } }
+  res.json(out);
+}));
+admin.post('/qikink/bridge/sync', wrap(async (req, res) => {
+  if (!bridgeOn()) return fail(res, 400, 'Set WC_URL, WC_KEY and WC_SECRET first');
+  res.json(await bridgeSync());
 }));
 
 /* ---------------- WooCommerce-compatible receiver (Qikink "Push to store") ---------------- */
