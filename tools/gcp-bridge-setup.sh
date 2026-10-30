@@ -16,7 +16,8 @@ export DEBIAN_FRONTEND=noninteractive
 # WP-CLI runs as the web server user, started from a folder that user can enter: from your home folder
 # its helper processes fail with "proc_open(): posix_spawn() failed: Permission denied".
 cd /tmp
-wp() { (cd /tmp && sudo -u www-data HOME=/tmp /usr/local/bin/wp --path="$WEB" "$@"); }
+# runuser (not sudo): Ubuntu 26.04's sudo-rs can refuse nested sudo calls; runuser needs no sudo rules.
+wp() { (cd /tmp && runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path="$WEB" "$@"); }
 
 echo "== 1/7 Swap (the free server has 1 GB of memory)"
 if ! swapon --show | grep -q /swapfile; then
