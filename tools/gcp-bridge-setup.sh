@@ -21,10 +21,11 @@ if ! swapon --show | grep -q /swapfile; then
   grep -q /swapfile /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-echo "== 2/7 Packages (a few minutes)"
-apt-get update -y >/dev/null
-apt-get install -y apache2 mariadb-server php libapache2-mod-php php-mysql php-curl php-gd php-mbstring \
-  php-xml php-zip php-intl php-bcmath unzip curl certbot python3-certbot-apache >/dev/null
+echo "== 2/7 Packages (5-10 minutes on the free server; a brand-new server may first finish its own updates)"
+# Progress stays visible (a silent screen here looks stuck). apt waits up to 15 min for Ubuntu's first-boot updates.
+apt-get -o DPkg::Lock::Timeout=900 update -y
+apt-get -o DPkg::Lock::Timeout=900 install -y -q apache2 mariadb-server php libapache2-mod-php php-mysql php-curl php-gd php-mbstring \
+  php-xml php-zip php-intl php-bcmath unzip curl certbot python3-certbot-apache
 
 echo "== 3/7 Database"
 [ -f /root/.bridge-db ] || openssl rand -hex 16 > /root/.bridge-db
