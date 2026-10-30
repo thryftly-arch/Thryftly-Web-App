@@ -13,7 +13,10 @@ EMAIL="${2:?usage: sudo bash gcp-bridge-setup.sh <domain> <email>}"
 [ "$(id -u)" = 0 ] || { echo "Run it with sudo."; exit 1; }
 WEB=/var/www/bridge
 export DEBIAN_FRONTEND=noninteractive
-wp() { sudo -u www-data HOME=/tmp /usr/local/bin/wp --path="$WEB" "$@"; }
+# WP-CLI runs as the web server user, started from a folder that user can enter: from your home folder
+# its helper processes fail with "proc_open(): posix_spawn() failed: Permission denied".
+cd /tmp
+wp() { (cd /tmp && sudo -u www-data HOME=/tmp /usr/local/bin/wp --path="$WEB" "$@"); }
 
 echo "== 1/7 Swap (the free server has 1 GB of memory)"
 if ! swapon --show | grep -q /swapfile; then
