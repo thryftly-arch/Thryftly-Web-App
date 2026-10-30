@@ -116,6 +116,14 @@ const lockedUntil = id => {
   return d ? d.startsAt : '';
 };
 
+// WordPress sites without pretty permalinks are addressed as /?rest_route=/wc/v3/… (Qikink's push may use it).
+// First, so everything below sees the /wp-json/… path.
+app.use((req, res, next) => {
+  const u = new URL(req.url, 'http://x'), r = u.searchParams.get('rest_route');
+  if (r) { u.searchParams.delete('rest_route'); req.url = '/wp-json' + r + u.search; }
+  next();
+});
+
 /* ---------------- Supabase: fresh data in, every change saved before the reply ---------------- */
 // Reads use data at most 5s old. A write waits its turn, reloads, and its reply is held until the save lands,
 // so nothing is lost when Netlify freezes the function after replying.
@@ -1072,7 +1080,12 @@ admin.post('/import/qikink', express.text({ type: '*/*', limit: '2mb' }), (req, 
 // WooCommerce REST v3 API. The plugin's half is replayed by these admin endpoints (the owner's
 // Qikink account email → OTP → our API keys to Qikink). See docs/qikink-woocommerce.md.
 const wooKeys = () => process.env.WOO_CONSUMER_KEY && process.env.WOO_CONSUMER_SECRET;
-admin.get('/qikink/woo/status', wrap(async (req, res) => res.json(await I.qikinkPlugin('check_install', { Store_URL: siteUrl() }))));
+admin.get('/qikink/woo/status', wrap(async (req, res) => res.json({
+    ...(await I.qikinkPlugin('check_install', { Store_URL: siteUrl() })),
+    storeUrl: siteUrl(), keysSet: !!wooKeys(), https: siteUrl().startsWith('https://'),
+    pushed: db.products.filter(p => p.woo).map(p => ({ id: p.id, name: p.name, active: p.active, variants: p.sizes.length, at: p.woo.at || '' })),
+    log: db.wooLog || [],
+  })));
 admin.post('/qikink/woo/connect', wrap(async (req, res) => res.json(await I.qikinkPlugin('wp_plugin', { EmailId: str(req.body.email, 200), store_url: siteUrl() }))));
 admin.post('/qikink/woo/otp', wrap(async (req, res) => {
   if (!wooKeys()) return fail(res, 503, 'Set WOO_CONSUMER_KEY and WOO_CONSUMER_SECRET first');
@@ -1084,8 +1097,8 @@ admin.post('/qikink/woo/otp', wrap(async (req, res) => {
 
 /* ---------------- WooCommerce-compatible receiver (Qikink "Push to store") ---------------- */
 // Only the slice of WC REST v3 a product push needs. Pushed products land hidden until ticked Live.
-// Qikink's exact requests are undocumented, so every call is logged to data/woo-log.jsonl.
-// ponytail: log grows forever; rotate or drop it once a real push has been checked.
+// Qikink's exact requests are undocumented, so every call is logged (last 40 in the database, all of them
+// in data/woo-log.jsonl locally or the function log on Netlify).
 const W = () => (db.woo ||= { seq: 1000, objects: {} });
 const wooId = () => ++W().seq;
 const wooStore = col => (W().objects[col] ||= []);
@@ -1104,16 +1117,14 @@ function wooList(req, res, items) {
   res.set({ 'X-WP-Total': items.length, 'X-WP-TotalPages': Math.ceil(items.length / per) }).json(items.slice((page - 1) * per, page * per));
 }
 
-// Sites without pretty permalinks are addressed as /?rest_route=/wc/v3/...
-app.use((req, res, next) => {
-  const u = new URL(req.url, 'http://x'), r = u.searchParams.get('rest_route');
-  if (r) { u.searchParams.delete('rest_route'); req.url = '/wp-json' + r + u.search; }
-  next();
-});
 app.use('/wp-json', express.urlencoded({ extended: true, limit: '12mb' }), (req, res, next) => {
   const entry = { at: new Date().toISOString(), method: req.method, url: req.originalUrl.replace(/(consumer_secret=)[^&]*/, '$1***'), auth: (req.get('authorization') || '').split(' ')[0], ua: req.get('user-agent'), body: req.body };
-  if (S.remote) console.log('woo', JSON.stringify(entry)); // no disk on Netlify: it lands in the function log
+  // Kept in the database (last 40, shown in Admin → Qikink push) so a real push can be checked.
+  const body = JSON.stringify(entry.body ?? '');
+  db.wooLog = [{ ...entry, body: body.length > 3000 ? body.slice(0, 3000) + '…' : body }, ...(db.wooLog || [])].slice(0, 40);
+  if (S.remote) console.log('woo', JSON.stringify(entry));
   else fs.appendFile(path.join(DATA_DIR, 'woo-log.jsonl'), JSON.stringify(entry) + '\n', () => {});
+  save();
   next();
 });
 app.get('/wp-json', (req, res) => res.json({ name: db.settings.footerWord || 'THRYFTLY', url: siteUrl(), home: siteUrl(), namespaces: ['wp/v2', 'wc/v3'] }));
@@ -1161,6 +1172,7 @@ async function wooUpsertProduct(b, p) {
     });
     db.products.push(p);
   }
+  p.woo.at = new Date().toISOString();
   if (b.name) p.name = str(b.name, 80).toUpperCase();
   if (b.description || b.short_description) p.description = I.htmlToText(b.description || b.short_description).slice(0, 2000);
   if (num(b.regular_price || b.price)) p.price = p.woo.price = num(b.regular_price || b.price);
@@ -1173,7 +1185,8 @@ async function wooUpsertProduct(b, p) {
   }
   if (Array.isArray(b.attributes)) p.woo.attributes = b.attributes.map(a => ({ ...a, name: attrName(a) }));
   if (Array.isArray(b.images)) {
-    p.woo.images = (await Promise.all(b.images.slice(0, 20).map(i => (i?.src ? localImage(str(i.src, 1000)) : '')))).filter(Boolean);
+    // Qikink's mockups stay on Qikink's servers: copying 20 images could outrun Netlify's 10 s limit.
+    p.woo.images = b.images.slice(0, 20).map(i => imgUrl(str(i?.src, 500))).filter(Boolean);
     const [front = '', back = '', detail = '', onBody = ''] = p.woo.images;
     p.images = { front, back, detail, onBody };
   }
@@ -1200,7 +1213,7 @@ async function wooUpsertVariation(p, v, key) {
   Object.assign(s, { label: r.label, color: r.color, sku: r.sku || s.sku });
   if (v.manage_stock && v.stock_quantity != null) s.stock = Math.floor(num(v.stock_quantity, 0, 99999));
   const img = v.image?.src || p.woo.images[v.image?.id - 1];
-  if (img && r.color) p.colorImages[r.color] = await localImage(str(img, 1000));
+  if (img && r.color && imgUrl(str(img, 500))) p.colorImages[r.color] = imgUrl(str(img, 500));
   p.woo.vars[key] = r;
   wooPrices(p);
   return key;

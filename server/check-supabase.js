@@ -37,7 +37,7 @@ await new Promise(r => mock.listen(0, r));
 Object.assign(process.env, {
   SUPABASE_URL: `http://127.0.0.1:${mock.address().port}`, SUPABASE_SECRET_KEY: 'sb_secret_test',
   LAMBDA_TASK_ROOT: '/var/task', ADMIN_PASSWORD: 'pw-for-check', SESSION_SECRET: 'x'.repeat(64),
-  QIKINK_CLIENT_ID: '', RAZORPAY_KEY_ID: '',
+  QIKINK_CLIENT_ID: '', RAZORPAY_KEY_ID: '', WOO_CONSUMER_KEY: 'ck_test', WOO_CONSUMER_SECRET: 'cs_test',
 });
 const { handler } = await import('../netlify/functions/api.mjs');
 const S = await import('./store.js');
@@ -96,6 +96,23 @@ assert.ok(files.get(name)?.equals(png), 'image bytes landed in Storage');
 // Imports can't run inside a function; the save of a failed write isn't attempted.
 r = await call('POST', '/api/admin/import/shopify', { body: 'x', headers: { ...A, 'content-type': 'text/csv' } });
 assert.equal(r.status, 400);
+
+// Qikink "Push to store": /?rest_route=/wc/v3/… reaches the store through the function, is checked,
+// saved (hidden, Qikink's image links kept) and logged for the admin.
+const wp = async (method, route, { body, auth } = {}) => {
+  const r = await handler({
+    httpMethod: method, path: '/', queryStringParameters: { rest_route: route }, isBase64Encoded: false, body: body ? JSON.stringify(body) : null,
+    headers: { host: 'shop.test', 'x-forwarded-for': '1.2.3.4', 'content-type': 'application/json', ...(auth && { authorization: 'Basic ' + Buffer.from('ck_test:cs_test').toString('base64') }) },
+  }, {});
+  return { status: r.statusCode, json: JSON.parse(r.body || 'null') };
+};
+r = await wp('GET', '/wc/v3/products');
+assert.equal(r.status, 401, 'push without the store keys is refused');
+r = await wp('POST', '/wc/v3/products', { auth: true, body: { name: 'Pushed Tee', type: 'simple', sku: 'qk-1', regular_price: '799', images: [{ src: 'https://qikink-assets.example/front.jpg' }] } });
+assert.equal(r.status, 201, JSON.stringify(r.json));
+const pushed = [...rows.values()].find(x => x.coll === 'products' && x.data.name === 'PUSHED TEE')?.data;
+assert.ok(pushed && pushed.active === false && pushed.price === 799 && pushed.images.front === 'https://qikink-assets.example/front.jpg', 'pushed product saved hidden, with Qikink\'s image link');
+assert.ok(rows.get('doc/wooLog')?.data.length >= 2, 'push requests logged for the admin');
 
 assert.ok((await S.listFiles()).has(name));
 mock.close();

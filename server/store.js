@@ -131,7 +131,7 @@ function migrate() {
 
 export const db = {};
 const ROWS = ['products', 'drops', 'orders', 'messages', 'subscribers', 'discounts', 'sizeCharts', 'reviews', 'returns', 'restock'];
-const DOCS = ['settings', 'pages', 'importedImages', 'woo'];
+const DOCS = ['settings', 'pages', 'importedImages', 'woo', 'wooLog'];
 const rowId = (coll, r) => String(coll === 'subscribers' ? r.email : r.id);
 
 /* ---------- local file ---------- */

@@ -21,6 +21,14 @@
   status = 200
   force = true
 
+# WordPress-style /?rest_route=/wc/v3/… (Qikink "Push to store") goes to the function too.
+[[redirects]]
+  from = "/"
+  to = "/.netlify/functions/api/?rest_route=:route"
+  status = 200
+  force = true
+  query = {rest_route = ":route"}
+
 [[redirects]]
   from = "/wp-json/*"
   to = "/.netlify/functions/api/wp-json/:splat"

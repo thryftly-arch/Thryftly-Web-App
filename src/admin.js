@@ -56,7 +56,7 @@ async function boot() {
 $$('.adm-tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
 function go(tab) {
   $$('.adm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
-  ({ overview: viewOverview, discounts: viewDiscounts, charts: viewCharts, customers: viewCustomers, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs, returns: viewReturns, reviews: viewReviews, waitlist: viewWaitlist })[tab]();
+  ({ qikink: viewQikink, overview: viewOverview, discounts: viewDiscounts, charts: viewCharts, customers: viewCustomers, products: viewProducts, drops: viewDrops, site: viewSite, pages: viewPages, messages: viewMessages, orders: viewOrders, subscribers: viewSubs, returns: viewReturns, reviews: viewReviews, waitlist: viewWaitlist })[tab]();
 }
 
 /* ---------- image field (click or drop to upload) ---------- */
@@ -611,6 +611,58 @@ async function viewCustomers() {
   ['.q', '.st'].forEach(sel => $(sel, main()).addEventListener('input', draw));
   draw();
   $('.export', main()).addEventListener('click', () => csv('thryftly-customers.csv', [['name', 'email', 'phone', 'city', 'orders', 'spent', 'last order', 'account', 'drop list'], ...list.map(c => [c.name, c.email, c.phone, c.city, c.orders, c.spent, c.last, c.account ? 'yes' : 'no', c.subscribed ? 'yes' : 'no'])]));
+}
+
+/* ---------- Qikink "Push to store" ---------- */
+// Qikink only pushes to Shopify / WooCommerce; this site answers as a WooCommerce store.
+// Connect once (Qikink account email → OTP), then push products from Qikink → My Products.
+async function viewQikink() {
+  main().innerHTML = '<div class="adm-bar"><h1 class="adm-h">QIKINK PUSH</h1></div><p class="adm-note">Checking with Qikink…</p>';
+  let st;
+  try { st = await req('GET', '/qikink/woo/status'); } catch (e) { return toast(e.message, true); }
+  const ready = st.keysSet && st.https;
+  main().innerHTML = `<div class="adm-bar"><h1 class="adm-h">QIKINK PUSH</h1><button class="btn-ghost refresh">REFRESH</button></div>
+    <p class="adm-note">Push new products from Qikink straight into this shop, like you did with Shopify: colours, sizes, SKUs, prices and mockups come across. Pushed products arrive <b>hidden</b>: check them in Products, then tick LIVE ON SITE. Qikink sees this shop as a WooCommerce store.</p>
+    <div class="adm-stats">
+      <div class="adm-stat"><small>CONNECTION</small><b>${st.is_install ? 'CONNECTED' : 'NOT CONNECTED'}</b><i>${st.is_install ? esc(st.client_business_name || 'Qikink account linked') : 'connect below'}</i></div>
+      <div class="adm-stat"><small>STORE ADDRESS</small><b style="font-size:13px;word-break:break-all">${esc(st.storeUrl)}</b><i>${st.https ? 'Qikink knows the shop by this' : 'must be https: set SITE_URL'}</i></div>
+      <div class="adm-stat"><small>STORE KEYS</small><b>${st.keysSet ? 'SET' : 'MISSING'}</b><i>${st.keysSet ? 'WOO_CONSUMER_KEY / SECRET' : 'add WOO_CONSUMER_KEY and WOO_CONSUMER_SECRET'}</i></div>
+      <div class="adm-stat"><small>PUSHED PRODUCTS</small><b>${st.pushed.length}</b><i>${st.pushed.filter(p => !p.active).length} waiting to go live</i></div>
+    </div>
+    ${st.is_install ? `<div class="adm-form" style="margin-top:18px"><div class="adm-field full"><b>NEXT:</b> in Qikink go to <b>My Products</b>, tick the products and choose <b>Push to store → WooCommerce</b>. They show up here and in Products (hidden) within a minute.</div></div>`
+      : `<form class="adm-form qk-connect" style="margin-top:18px">
+        <h2 class="adm-field full" style="font-size:12px;color:var(--yel)">CONNECT YOUR QIKINK ACCOUNT</h2>
+        ${ready ? '' : '<p class="adm-note full red">Set the missing items above in Netlify (then redeploy) before connecting.</p>'}
+        <label class="adm-field">1 · QIKINK LOGIN EMAIL<input name="email" type="email" required ${ready ? '' : 'disabled'}></label>
+        <div class="adm-field"><span>&nbsp;</span><button type="button" class="btn-ghost send" ${ready ? '' : 'disabled'}>SEND OTP →</button></div>
+        <label class="adm-field">2 · OTP FROM QIKINK'S EMAIL<input name="otp" inputmode="numeric" autocomplete="one-time-code" disabled></label>
+        <div class="adm-field"><span>&nbsp;</span><button class="btn-red verify" disabled>CONNECT</button></div>
+      </form>`}
+    ${st.pushed.length ? `<h2 class="adm-h" style="font-size:16px;margin:28px 0 12px">PUSHED PRODUCTS</h2><table class="adm-table"><tbody>${st.pushed.map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${p.variants} variants</td><td>${p.active ? '<span class="adm-pill green">LIVE</span>' : '<span class="adm-pill grey">HIDDEN</span>'}</td><td>${p.at ? new Date(p.at).toLocaleString() : ''}</td></tr>`).join('')}</tbody></table>` : ''}
+    <h2 class="adm-h" style="font-size:16px;margin:28px 0 12px">WHAT QIKINK SENT <small style="font-size:11px">(last 40 requests; useful if a push doesn't show up)</small></h2>
+    <div class="list">${st.log.length ? st.log.map(e => `<details class="adm-order"><summary><span>${new Date(e.at).toLocaleString()}</span><span>${esc(e.method)} ${esc(e.url.slice(0, 70))}</span><span>${e.status ? `<span class="adm-pill ${e.status < 300 ? 'green' : 'red'}">${e.status}</span>` : ''}</span></summary><div class="adm-order-body"><pre style="white-space:pre-wrap;word-break:break-all;font-size:11px">${esc(e.body)}</pre></div></details>`).join('') : '<p class="adm-note">Nothing yet.</p>'}</div>`;
+  $('.refresh', main()).addEventListener('click', viewQikink);
+  const f = $('.qk-connect', main());
+  if (!f) return;
+  let clientId = '';
+  $('.send', f).addEventListener('click', async () => {
+    if (!f.email.reportValidity()) return;
+    try {
+      const r = await req('POST', '/qikink/woo/connect', { email: f.email.value.trim() });
+      if (!r.status) return toast(r.msg || 'Qikink did not recognise that email', true);
+      clientId = r.client_id;
+      f.otp.disabled = false; $('.verify', f).disabled = false; f.otp.focus();
+      toast('OTP SENT: CHECK THAT INBOX');
+    } catch (e) { toast(e.message, true); }
+  });
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const r = await req('POST', '/qikink/woo/otp', { client_id: clientId, otp: f.otp.value.trim() });
+      toast(r.keys?.status < 300 ? 'CONNECTED: PUSH PRODUCTS FROM QIKINK NOW' : 'OTP ok, but Qikink did not take the store keys: ' + (r.keys?.body || ''), !(r.keys?.status < 300));
+      viewQikink();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 /* ---------- subscribers ---------- */
