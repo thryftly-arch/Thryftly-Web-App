@@ -121,3 +121,22 @@ try {
   assert.ok(log.split('\n').length > 8 && !log.includes('cs_test'), 'requests logged without the secret');
 } finally { srv.kill(); }
 console.log('woocommerce receiver checks ok');
+
+// Order emails: Qikink's instant "In-Transit" + tracking link is not "shipped"; delivered needs a delivery date.
+{
+  const { applyQikinkStatus, isShipped, isDelivered, addWorkdays } = await import('./orderstate.js');
+  const day = 864e5, fri = Date.parse('2026-10-30T10:00:00Z');
+  assert.equal(new Date(addWorkdays(fri, 2)).getUTCDay(), 2, 'Fri + 2 business days = Tue');
+  const q = { status: 'In-Transit', delivered_on: null, shipping: { awb: '466', tracking_link: 'https://courierupdates.com/?awb=466', courier_provider_name: 'Delhivery' } };
+  const o = { paidAt: new Date(fri).toISOString() };
+  applyQikinkStatus(o, q);
+  assert.ok(o.tracking?.url && !isShipped(o, 2, fri + 60e3), 'In-Transit a minute after paying is not shipped');
+  assert.ok(isShipped(o, 2, fri + 5 * day), 'In-Transit after the dispatch window is shipped');
+  assert.ok(!isDelivered(o));
+  applyQikinkStatus(o, { ...q, status: 'Delivered', delivered_on: '2026-11-04 14:30:00' });
+  assert.ok(isDelivered(o) && o.deliveredAt === '2026-11-04T09:00:00.000Z', 'delivery date from Qikink (IST)');
+  const c = { paidAt: new Date(fri).toISOString() };
+  applyQikinkStatus(c, { status: 'Cancelled', delivered_on: null, shipping: { tracking_link: 'https://x' } });
+  assert.ok(!isShipped(c, 2, fri + 9 * day) && !isDelivered(c), 'a cancelled order never ships');
+  console.log('order email timing checks ok');
+}

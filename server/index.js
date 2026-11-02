@@ -11,6 +11,7 @@ import multer from 'multer';
 import * as S from './store.js';
 import * as I from './integrations.js';
 import * as M from './mail.js';
+import { applyQikinkStatus, isShipped, isDelivered } from './orderstate.js';
 
 const { db, save, id, UPLOAD_DIR, DATA_DIR } = S;
 
@@ -212,16 +213,26 @@ app.post('/api/contact', rateLimit({ windowMs: 15 * 60e3, limit: 5 }), wrap(asyn
 
 // Customer order tracking: needs the order number AND the email it was placed with.
 const CUSTOMER_STATUS = { created: 'AWAITING PAYMENT', paid: 'CONFIRMED', sent_to_qikink: 'IN PRODUCTION', fulfillment_failed: 'CONFIRMED', refunded: 'CANCELLED & REFUNDED' };
+// Customers see Qikink's status and the tracking link only once the order has really shipped.
+const customerStatus = o => {
+  if (isDelivered(o)) return 'DELIVERED';
+  if (/cancel|rto|return/i.test(o.qikinkStatus || '') || shipped(o)) return String(o.qikinkStatus).toUpperCase();
+  return (CUSTOMER_STATUS[o.status] || o.status).toUpperCase();
+};
+const customerTracking = o => (shipped(o) && o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null);
 
-// Qikink's status and tracking onto an order. Emails the customer once when it ships and once when it's delivered.
+// Qikink's status and tracking onto an order. Emails the customer once when it really ships and once when it's
+// delivered (server/orderstate.js: Qikink's instant "In-Transit" + tracking link don't count as shipped).
+const shipped = o => isShipped(o, +db.settings.dispatchMin || 2);
 async function applyQikink(o, q) {
-  o.qikinkStatus = q.status;
-  if (q.shipping?.tracking_link) o.tracking = { awb: q.shipping.awb, url: q.shipping.tracking_link, courier: q.shipping.courier_provider_name };
+  applyQikinkStatus(o, q);
   o.mailed ||= {};
   const jobs = [];
-  if (o.tracking?.url && !o.mailed.shipped) { o.mailed.shipped = true; jobs.push(mailOrder(o.customer.email, M.orderShipped, o)); }
-  if (/deliver/i.test(q.status || '') && !/undeliver|rto|return/i.test(q.status) && !o.mailed.delivered) {
-    o.mailed.delivered = true; o.deliveredAt ||= new Date().toISOString();
+  // Delivered before we ever saw it ship: just the delivered email.
+  if (isDelivered(o) && !o.mailed.shipped) o.mailed.shipped = true;
+  if (shipped(o) && !o.mailed.shipped) { o.mailed.shipped = true; jobs.push(mailOrder(o.customer.email, M.orderShipped, o)); }
+  if (isDelivered(o) && !o.mailed.delivered) {
+    o.mailed.delivered = true;
     const first = db.products.find(p => p.id === o.items[0]?.productId && p.active);
     jobs.push(mailOrder(o.customer.email, M.orderDelivered, o, { reviewUrl: first ? productLink(first) + '#reviews' : '', exchangeDays: db.settings.exchangeDays }));
   }
@@ -266,10 +277,10 @@ function orderForCustomer(o) {
   return {
     number: o.number, placed: o.createdAt, paidAt: o.paidAt || '', deliveredAt: o.deliveredAt || '', amount: o.amount, currency: o.currency,
     subtotal: o.subtotal, shipping: o.shipping, discount: o.discount || null, refund: o.refund ? { amount: o.refund.amount, at: o.refund.at } : null,
-    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(), paid: !!o.paidAt,
+    status: customerStatus(o), paid: !!o.paidAt,
     items: o.items.map(i => ({ slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: itemImage(i) })),
     customer: { name: o.customer.name, address1: o.customer.address1, address2: o.customer.address2, city: o.customer.city, state: o.customer.state, zip: o.customer.zip, phone: o.customer.phone.replace(/^(\d{2})\d{5}/, '$1•••••'), email: o.customer.email },
-    tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
+    tracking: customerTracking(o),
     returns: db.returns.filter(r => r.orderId === o.id).map(r => ({ number: r.number, type: r.type, status: r.status, at: r.at, reply: r.reply || '' })),
   };
 }
@@ -580,8 +591,8 @@ app.get('/api/account', needUser, wrap(async (req, res) => {
   const byId = Object.fromEntries(db.products.map(p => [p.id, p]));
   const orders = mine(req.user).reverse().map(o => ({
     number: o.number, placed: o.createdAt, amount: o.amount, email: o.customer.email,
-    status: (o.qikinkStatus || CUSTOMER_STATUS[o.status] || o.status).toUpperCase(),
-    tracking: o.tracking?.url && /^https:\/\//.test(o.tracking.url) ? o.tracking : null,
+    status: customerStatus(o),
+    tracking: customerTracking(o),
     items: o.items.map(i => { const p = byId[i.productId]; return { slug: i.slug, name: i.name, size: i.size, color: i.color, qty: i.qty, price: i.price, image: p ? p.colorImages?.[i.color] || p.images.front : '' }; }),
   }));
   // First visit to the account: send the welcome email once.
